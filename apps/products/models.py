@@ -34,7 +34,7 @@ class Category(TimeStampedModel):
 
 
 class Product(TimeStampedModel):
-    """A single chocolate item, e.g. 'Dubai Kunafa Chocolate'."""
+    """A single chocolate item, e.g. 'Kunafa Chocolate'."""
 
     category = models.ForeignKey(Category, on_delete=models.PROTECT, related_name="products")
     name = models.CharField(max_length=200)
