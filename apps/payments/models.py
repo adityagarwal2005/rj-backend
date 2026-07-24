@@ -35,6 +35,11 @@ class Payment(UUIDPrimaryKeyModel, TimeStampedModel):
     gateway_payment_id = models.CharField(max_length=100, blank=True)
     gateway_signature = models.CharField(max_length=255, blank=True)
 
+    # Customer-submitted UPI transaction reference (UTR/RRN) for manual
+    # transfers, so staff can match a bank-statement entry to this payment
+    # instead of guessing from amount/timing alone.
+    utr_reference = models.CharField(max_length=35, blank=True)
+
     class Meta:
         ordering = ["-created_at"]
 

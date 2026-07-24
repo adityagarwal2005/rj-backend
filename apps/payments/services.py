@@ -6,6 +6,7 @@ a provider (Razorpay, Stripe, etc.) later means writing one new class here
 and registering it in GATEWAYS, with no changes to views/models/orders.
 """
 
+import razorpay
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -46,6 +47,8 @@ def get_manual_payment_details() -> dict:
             "Please pay the order total via UPI using the details above, then we'll "
             "confirm your payment and start preparing your order."
         ),
+        "razorpay_enabled": bool(settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET),
+        "razorpay_key_id": settings.RAZORPAY_KEY_ID,
     }
 
 
@@ -81,34 +84,97 @@ class CODGateway(PaymentGateway):
         return True
 
 
+def get_razorpay_client() -> razorpay.Client:
+    return razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+
+
 class RazorpayGateway(PaymentGateway):
     """
-    Not yet implemented - stubbed so the API contract (endpoints, request/
-    response shapes) is stable for the frontend before a real Razorpay
-    integration is added. Wiring this up later is just filling in these
-    two methods with the `razorpay` SDK calls.
+    Automated gateway: create_payment_intent opens a Razorpay Order that the
+    frontend's Razorpay Checkout widget pays against; verify_payment checks
+    the HMAC signature Razorpay's checkout callback returns to prove the
+    payment actually succeeded (not just that the browser says so). Only
+    registered in GATEWAYS below when real keys are configured.
     """
 
     code = PaymentGatewayChoice.RAZORPAY
 
     def create_payment_intent(self, payment: Payment) -> dict:
-        raise NotImplementedError("Razorpay integration is not implemented yet.")
+        client = get_razorpay_client()
+        amount_paise = int(payment.amount * 100)
+        razorpay_order = client.order.create(
+            {
+                "amount": amount_paise,
+                "currency": payment.currency,
+                "receipt": str(payment.id),
+                "notes": {"order_id": str(payment.order_id)},
+            }
+        )
+        payment.gateway_order_id = razorpay_order["id"]
+        payment.save(update_fields=["gateway_order_id"])
+        return {
+            "gateway": self.code,
+            "key_id": settings.RAZORPAY_KEY_ID,
+            "razorpay_order_id": razorpay_order["id"],
+            "amount": amount_paise,
+            "currency": payment.currency,
+        }
 
     def verify_payment(self, payment: Payment, callback_payload: dict) -> bool:
-        raise NotImplementedError("Razorpay integration is not implemented yet.")
+        client = get_razorpay_client()
+        try:
+            client.utility.verify_payment_signature(
+                {
+                    "razorpay_order_id": payment.gateway_order_id,
+                    "razorpay_payment_id": callback_payload.get("gateway_payment_id", ""),
+                    "razorpay_signature": callback_payload.get("gateway_signature", ""),
+                }
+            )
+            return True
+        except razorpay.errors.SignatureVerificationError:
+            return False
 
 
-# COD and Razorpay are intentionally left out of the active registry: the
-# business is prepaid-only right now, so only "manual" can be initiated via
-# the API even though the gateway classes (and DB choice, for historical
-# orders) still exist.
-GATEWAYS = {
-    PaymentGatewayChoice.MANUAL: ManualGateway(),
-}
+def _active_gateways() -> dict:
+    """
+    Built fresh on each call (rather than a module-level dict) so that
+    turning Razorpay on/off is purely a matter of the env vars being set -
+    no restart-sensitive import-time caching, and tests can toggle it with
+    override_settings.
+
+    COD is intentionally left out: the business is prepaid-only right now,
+    so only "manual" (and "razorpay", once configured) can be initiated via
+    the API, even though the COD gateway class (and DB choice, for
+    historical orders) still exists.
+    """
+    gateways = {PaymentGatewayChoice.MANUAL: ManualGateway()}
+    if settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET:
+        gateways[PaymentGatewayChoice.RAZORPAY] = RazorpayGateway()
+    return gateways
+
+
+def confirm_razorpay_order_payment(gateway_order_id: str, gateway_payment_id: str, succeeded: bool) -> Payment | None:
+    """
+    Used by the Razorpay dashboard webhook (server-to-server), which is a
+    reliability safety net alongside the client-side checkout callback: if a
+    customer's browser closes right after paying, before the checkout
+    callback POSTs to confirm_payment() above, this still confirms the order.
+    """
+    payment = (
+        Payment.objects.filter(gateway=PaymentGatewayChoice.RAZORPAY, gateway_order_id=gateway_order_id)
+        .order_by("-created_at")
+        .first()
+    )
+    if payment is None or payment.status != PaymentStatus.PENDING:
+        return payment
+    payment.status = PaymentStatus.SUCCESS if succeeded else PaymentStatus.FAILED
+    payment.gateway_payment_id = gateway_payment_id
+    payment.save(update_fields=["status", "gateway_payment_id"])
+    return payment
 
 
 def get_gateway(code: str) -> PaymentGateway:
-    gateway = GATEWAYS.get(code)
+    gateway = _active_gateways().get(code)
     if gateway is None:
         raise ValidationError(f"Unsupported payment gateway: {code}")
     return gateway

@@ -11,3 +11,4 @@ Pillow==12.3.0
 gunicorn==22.0.0
 whitenoise==6.6.0
 django-anymail==11.1
+razorpay==2.0.1

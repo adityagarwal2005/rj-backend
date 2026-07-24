@@ -209,6 +209,16 @@ PAYMENT_BANK_NAME = env("PAYMENT_BANK_NAME", default="Your Bank Name")
 # WhatsApp checkout: full number with country code, no '+' or spaces (e.g. 919999999999).
 PAYMENT_WHATSAPP_NUMBER = env("PAYMENT_WHATSAPP_NUMBER", default="910000000000")
 
+# --- Razorpay (optional automated gateway, alongside manual UPI) ---
+# Left blank until KYC/signup is done - apps.payments.services only
+# registers the Razorpay gateway when a key is actually configured, so this
+# is safe to leave empty. RAZORPAY_KEY_ID is also exposed to the frontend
+# (it's a publishable identifier, not a secret) to know whether to show the
+# "Pay with Razorpay" option at all.
+RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
+RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
+RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET", default="")
+
 # --- Logging ---
 # Without this, Django's default logging only emails unhandled 500s to
 # ADMINS (unset here) and prints nothing to console - so on a platform like

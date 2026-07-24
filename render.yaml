@@ -47,6 +47,12 @@ services:
         sync: false
       - key: PAYMENT_WHATSAPP_NUMBER
         sync: false
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false
+      - key: RAZORPAY_WEBHOOK_SECRET
+        sync: false
       - key: ACCESS_TOKEN_LIFETIME_MINUTES
         value: "60"
       - key: REFRESH_TOKEN_LIFETIME_DAYS
