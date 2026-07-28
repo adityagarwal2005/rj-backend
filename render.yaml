@@ -19,6 +19,8 @@ services:
         sync: false
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: SUPABASE_STORAGE_ENDPOINT_URL
