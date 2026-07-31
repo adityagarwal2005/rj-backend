@@ -11,7 +11,10 @@ class OrderItemInline(admin.TabularInline):
 
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
-    list_display = ["id", "user", "status", "total_amount", "created_at"]
+    list_display = [
+        "id", "user", "status", "total_amount", "referral_discount_amount",
+        "abandoned_reminder_sent_at", "created_at",
+    ]
     list_filter = ["status"]
     search_fields = ["id", "user__email"]
     inlines = [OrderItemInline]

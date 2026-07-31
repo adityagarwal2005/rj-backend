@@ -2,7 +2,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from apps.users.models import User
+from apps.users.models import ReferralCredit, User
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -10,22 +10,29 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "phone", "role", "created_at"]
-        read_only_fields = ["id", "email", "role", "created_at"]
+        fields = ["id", "email", "full_name", "phone", "role", "referral_code", "created_at"]
+        read_only_fields = ["id", "email", "role", "referral_code", "created_at"]
 
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, validators=[validate_password])
+    referral_code = serializers.CharField(write_only=True, required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "phone", "password"]
+        fields = ["id", "email", "full_name", "phone", "password", "referral_code"]
         read_only_fields = ["id"]
 
     def validate_email(self, value):
         value = value.lower().strip()
         if User.objects.filter(email=value).exists():
             raise serializers.ValidationError("An account with this email already exists.")
+        return value
+
+    def validate_referral_code(self, value):
+        value = value.strip().upper()
+        if value and not User.objects.filter(referral_code=value).exists():
+            raise serializers.ValidationError("That referral code doesn't look right.")
         return value
 
 
@@ -50,3 +57,10 @@ class LoginSerializer(TokenObtainPairSerializer):
 
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()
+
+
+class ReferralCreditSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReferralCredit
+        fields = ["id", "amount", "is_used", "created_at"]
+        read_only_fields = fields

@@ -1,14 +1,22 @@
 """Business logic for cart management and checkout."""
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from apps.notifications import services as notification_services
+from apps.orders import referrals
 from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatus
 from apps.orders.pricing import calculate_discount
 from apps.products import services as product_services
+
+# How long an unpaid order sits before we nudge the customer, and before we
+# give up entirely and release its stock back to the catalog.
+ABANDONED_REMINDER_DELAY = timedelta(hours=2)
+STALE_ORDER_CANCEL_DELAY = timedelta(hours=48)
 
 
 def get_or_create_cart(user) -> Cart:
@@ -50,6 +58,11 @@ def create_order_from_cart(user, address=None, notes: str = "") -> Order:
     if not cart_items:
         raise ValidationError("Your cart is empty.")
 
+    # Must be computed before the Order row below exists, or "is this their
+    # first order" would immediately see the order we're about to create.
+    is_first_order = referrals.is_first_order_for(user)
+    referral_credit = referrals.available_credit_for(user)
+
     order = Order.objects.create(
         user=user,
         address=address,
@@ -75,15 +88,23 @@ def create_order_from_cart(user, address=None, notes: str = "") -> Order:
 
     discount_percentage, discount_amount = calculate_discount(subtotal_amount)
 
+    referral_discount_amount = referrals.referee_discount_for(user, is_first_order)
+    if referral_credit is not None:
+        referral_discount_amount += referral_credit.amount
+        referral_credit.is_used = True
+        referral_credit.used_on_order = order
+        referral_credit.save(update_fields=["is_used", "used_on_order"])
+
     order.subtotal_amount = subtotal_amount
     order.discount_percentage = discount_percentage
     order.discount_amount = discount_amount
-    order.total_amount = subtotal_amount - discount_amount
+    order.referral_discount_amount = referral_discount_amount
+    order.total_amount = subtotal_amount - discount_amount - referral_discount_amount
     # This business is prepaid-only for now, so an order set to PENDING isn't
     # confirmed until payment is manually verified (see apps.payments.signals,
     # which flips PENDING/AWAITING_DETAILS orders to CONFIRMED on payment success).
     order.save(update_fields=[
-        "subtotal_amount", "discount_percentage", "discount_amount", "total_amount",
+        "subtotal_amount", "discount_percentage", "discount_amount", "referral_discount_amount", "total_amount",
     ])
 
     cart_items_ids = [item.id for item in cart_items]
@@ -102,7 +123,43 @@ def cancel_order(order: Order) -> Order:
         if item.product is not None:
             product_services.restore_stock(item.product, item.quantity)
 
+    # A cancelled order shouldn't have permanently spent a referral credit.
+    from apps.users.models import ReferralCredit
+
+    ReferralCredit.objects.filter(used_on_order=order).update(is_used=False, used_on_order=None)
+
     order.status = OrderStatus.CANCELLED
     order.save(update_fields=["status"])
     notification_services.notify_order_status_change(order)
     return order
+
+
+def send_abandoned_order_reminders() -> int:
+    """Nudge customers with a real unpaid order sitting untouched for a while. Sends at most once per order."""
+    cutoff = timezone.now() - ABANDONED_REMINDER_DELAY
+    stale_orders = Order.objects.filter(
+        status=OrderStatus.PENDING, created_at__lte=cutoff, abandoned_reminder_sent_at__isnull=True,
+    ).select_related("user").prefetch_related("items")
+
+    count = 0
+    for order in stale_orders:
+        notification_services.notify_abandoned_order(order)
+        order.abandoned_reminder_sent_at = timezone.now()
+        order.save(update_fields=["abandoned_reminder_sent_at"])
+        count += 1
+    return count
+
+
+def auto_cancel_stale_pending_orders() -> int:
+    """
+    Give up on orders nobody ever paid for and release their stock -
+    otherwise abandoned carts would quietly hold inventory hostage forever.
+    """
+    cutoff = timezone.now() - STALE_ORDER_CANCEL_DELAY
+    stale_orders = Order.objects.filter(status=OrderStatus.PENDING, created_at__lte=cutoff)
+
+    count = 0
+    for order in stale_orders:
+        cancel_order(order)
+        count += 1
+    return count

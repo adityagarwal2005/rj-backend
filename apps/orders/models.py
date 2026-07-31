@@ -95,8 +95,14 @@ class Order(UUIDPrimaryKeyModel, TimeStampedModel):
     subtotal_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"), validators=[MinValueValidator(Decimal("0"))])
     discount_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("0"))
     discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
+    # See apps.orders.referrals - a referee's first-order bonus and/or a
+    # redeemed ReferralCredit, on top of the tier discount above.
+    referral_discount_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("0"))
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0"))])
     notes = models.TextField(blank=True)
+    # Set once an abandoned-cart reminder has been sent for this order, so it
+    # only ever gets nudged once - see apps.orders.services.send_abandoned_order_reminders.
+    abandoned_reminder_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

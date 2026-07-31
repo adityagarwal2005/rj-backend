@@ -12,9 +12,12 @@ from apps.users.serializers import UserSerializer
 
 def register_user(validated_data: dict) -> User:
     password = validated_data.pop("password")
+    referral_code = validated_data.pop("referral_code", "").strip().upper()
     validated_data["email"] = validated_data["email"].lower().strip()
     user = User(**validated_data)
     user.set_password(password)
+    if referral_code:
+        user.referred_by = User.objects.filter(referral_code=referral_code).first()
     user.save()
     return user
 

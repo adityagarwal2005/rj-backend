@@ -34,3 +34,14 @@ def notify_order_status_change(order) -> None:
     message = f"Hi {order.user.full_name}, your RajwadiTukda order status changed to {order.get_status_display()}."
     create_notification(order.user, title, message, NotificationType.ORDER_UPDATE)
     send_email(order.user.email, title, message)
+
+
+def notify_abandoned_order(order) -> None:
+    items = ", ".join(f"{item.product_name} x {item.quantity}" for item in order.items.all())
+    title = "You left something in your cart!"
+    message = (
+        f"Hi {order.user.full_name}, your order for {items} is still waiting on payment. "
+        f"Complete it soon - unpaid orders are automatically released back to stock after 48 hours."
+    )
+    create_notification(order.user, title, message, NotificationType.PROMOTION)
+    send_email(order.user.email, title, message)

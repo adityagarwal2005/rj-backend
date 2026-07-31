@@ -1,10 +1,17 @@
+from datetime import timedelta
+from decimal import Decimal
+
+from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.orders.models import Address, Order
+from apps.orders import services
+from apps.orders.models import Address, Order, OrderStatus
+from apps.payments.models import Payment, PaymentStatus
 from apps.products.models import Category, Product
-from apps.users.models import User
+from apps.users.models import ReferralCredit, User
 
 
 class CartAndCheckoutTests(APITestCase):
@@ -110,3 +117,152 @@ class CartAndCheckoutTests(APITestCase):
     def test_whatsapp_checkout_fails_with_empty_cart(self):
         response = self.client.post(reverse("order-checkout-whatsapp"))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class ReferralProgramTests(APITestCase):
+    def setUp(self):
+        self.referrer = User.objects.create_user(email="friend@example.com", password="StrongPass123!", full_name="Friend")
+        self.user = User.objects.create_user(
+            email="cust@example.com", password="StrongPass123!", full_name="Cust", referred_by=self.referrer,
+        )
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=150, stock_quantity=10)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+
+    def test_referee_gets_discount_on_first_order(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        data = response.data["data"]
+        self.assertEqual(data["referral_discount_amount"], "30.00")
+        self.assertEqual(data["total_amount"], "120.00")
+
+    def test_referee_discount_does_not_apply_on_second_order(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("order-list"), {"address_id": self.address.id})
+
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        self.assertEqual(response.data["data"]["referral_discount_amount"], "0.00")
+
+    def test_referrer_earns_credit_when_referee_order_is_confirmed(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        order_id = order_response.data["data"]["id"]
+
+        payment = Payment.objects.create(order_id=order_id, gateway="manual", amount=120)
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+
+        self.assertTrue(ReferralCredit.objects.filter(user=self.referrer, amount=30, is_used=False).exists())
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.referral_reward_granted)
+
+    def test_referrer_credit_is_redeemed_on_next_order(self):
+        ReferralCredit.objects.create(user=self.referrer, amount=30)
+        self.client.force_authenticate(user=self.referrer)
+        Address.objects.create(
+            user=self.referrer, full_name="Friend", phone="9999999999",
+            line1="1 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        referrer_address = self.referrer.addresses.first()
+
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": referrer_address.id})
+
+        self.assertEqual(response.data["data"]["referral_discount_amount"], "30.00")
+        self.assertTrue(ReferralCredit.objects.get(user=self.referrer).is_used)
+
+    def test_cancelling_order_restores_unspent_referral_credit(self):
+        ReferralCredit.objects.create(user=self.referrer, amount=30)
+        self.client.force_authenticate(user=self.referrer)
+        Address.objects.create(
+            user=self.referrer, full_name="Friend", phone="9999999999",
+            line1="1 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        referrer_address = self.referrer.addresses.first()
+
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_response = self.client.post(reverse("order-list"), {"address_id": referrer_address.id})
+        order_id = order_response.data["data"]["id"]
+
+        self.client.post(reverse("order-cancel", args=[order_id]))
+
+        credit = ReferralCredit.objects.get(user=self.referrer)
+        self.assertFalse(credit.is_used)
+        self.assertIsNone(credit.used_on_order_id)
+
+    def test_cart_preview_includes_referral_discount(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.get(reverse("cart-detail"))
+        self.assertEqual(response.data["data"]["referral_discount_amount"], Decimal("30"))
+        self.assertEqual(response.data["data"]["total_amount"], Decimal("120"))
+
+
+class AbandonedOrderTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=200, stock_quantity=10)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        self.order = Order.objects.create(
+            user=self.user, address=self.address, status=OrderStatus.PENDING,
+            subtotal_amount=200, total_amount=200,
+        )
+
+    def test_recent_pending_order_is_not_reminded_yet(self):
+        count = services.send_abandoned_order_reminders()
+        self.assertEqual(count, 0)
+
+    def test_stale_pending_order_gets_one_reminder_only(self):
+        Order.objects.filter(id=self.order.id).update(created_at=timezone.now() - timedelta(hours=3))
+
+        count = services.send_abandoned_order_reminders()
+        self.assertEqual(count, 1)
+        self.order.refresh_from_db()
+        self.assertIsNotNone(self.order.abandoned_reminder_sent_at)
+
+        count_again = services.send_abandoned_order_reminders()
+        self.assertEqual(count_again, 0)
+
+    def test_very_stale_order_is_auto_cancelled(self):
+        Order.objects.filter(id=self.order.id).update(created_at=timezone.now() - timedelta(hours=49))
+
+        count = services.auto_cancel_stale_pending_orders()
+        self.assertEqual(count, 1)
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.CANCELLED)
+
+    def test_recent_pending_order_is_not_auto_cancelled(self):
+        count = services.auto_cancel_stale_pending_orders()
+        self.assertEqual(count, 0)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.PENDING)
+
+
+class ProcessAbandonedOrdersEndpointTests(APITestCase):
+    @override_settings(CRON_SECRET="test-secret")
+    def test_rejects_missing_or_wrong_secret(self):
+        response = self.client.post(reverse("process-abandoned-orders"))
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+        response = self.client.post(reverse("process-abandoned-orders"), HTTP_X_CRON_SECRET="wrong")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    @override_settings(CRON_SECRET="test-secret")
+    def test_accepts_correct_secret(self):
+        response = self.client.post(reverse("process-abandoned-orders"), HTTP_X_CRON_SECRET="test-secret")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("reminded", response.data["data"])
+        self.assertIn("cancelled", response.data["data"])
+
+    def test_rejects_everything_when_no_secret_configured(self):
+        response = self.client.post(reverse("process-abandoned-orders"), HTTP_X_CRON_SECRET="")
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

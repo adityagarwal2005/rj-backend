@@ -225,6 +225,12 @@ RAZORPAY_KEY_ID = env("RAZORPAY_KEY_ID", default="")
 RAZORPAY_KEY_SECRET = env("RAZORPAY_KEY_SECRET", default="")
 RAZORPAY_WEBHOOK_SECRET = env("RAZORPAY_WEBHOOK_SECRET", default="")
 
+# --- Cron (abandoned-order processing - see apps.orders.views.ProcessAbandonedOrdersView) ---
+# There's no background worker here, so an external scheduler (e.g. a free
+# cron-ping service) calls that endpoint periodically with this shared
+# secret in an X-Cron-Secret header instead of a logged-in user's token.
+CRON_SECRET = env("CRON_SECRET", default="")
+
 # --- Logging ---
 # Without this, Django's default logging only emails unhandled 500s to
 # ADMINS (unset here) and prints nothing to console - so on a platform like

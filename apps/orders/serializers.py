@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+from apps.orders import referrals
 from apps.orders.models import Address, Cart, CartItem, Order, OrderItem
 from apps.products.models import Product
 
@@ -51,11 +52,21 @@ class CartSerializer(serializers.ModelSerializer):
     subtotal_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     discount_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
     discount_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
-    total_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    referral_discount_amount = serializers.SerializerMethodField()
+    total_amount = serializers.SerializerMethodField()
 
     class Meta:
         model = Cart
-        fields = ["id", "items", "subtotal_amount", "discount_percentage", "discount_amount", "total_amount"]
+        fields = [
+            "id", "items", "subtotal_amount", "discount_percentage", "discount_amount",
+            "referral_discount_amount", "total_amount",
+        ]
+
+    def get_referral_discount_amount(self, obj):
+        return referrals.total_referral_discount_for(obj.user)
+
+    def get_total_amount(self, obj):
+        return obj.total_amount - self.get_referral_discount_amount(obj)
 
 
 class OrderItemSerializer(serializers.ModelSerializer):
@@ -76,11 +87,11 @@ class OrderSerializer(serializers.ModelSerializer):
         model = Order
         fields = [
             "id", "status", "subtotal_amount", "discount_percentage", "discount_amount",
-            "total_amount", "notes", "address", "items", "created_at",
+            "referral_discount_amount", "total_amount", "notes", "address", "items", "created_at",
         ]
         read_only_fields = [
             "id", "status", "subtotal_amount", "discount_percentage", "discount_amount",
-            "total_amount", "items", "created_at",
+            "referral_discount_amount", "total_amount", "items", "created_at",
         ]
 
 

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -7,9 +9,11 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.core.response import api_error, api_success
 from apps.users import services
+from apps.users.models import ReferralCredit, User
 from apps.users.serializers import (
     LoginSerializer,
     LogoutSerializer,
+    ReferralCreditSerializer,
     RegisterSerializer,
     UserSerializer,
 )
@@ -93,3 +97,21 @@ class ProfileView(generics.RetrieveUpdateAPIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return api_success(serializer.data, message="Profile updated successfully.")
+
+
+class ReferralSummaryView(APIView):
+    """GET /api/auth/referrals/ - the authenticated user's referral code, stats, and earned credits."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        credits = ReferralCredit.objects.filter(user=user)
+        available_credit = sum((c.amount for c in credits if not c.is_used), Decimal("0"))
+        return api_success({
+            "referral_code": user.referral_code,
+            "referred_count": User.objects.filter(referred_by=user).count(),
+            "successful_referrals": User.objects.filter(referred_by=user, referral_reward_granted=True).count(),
+            "available_credit": available_credit,
+            "credits": ReferralCreditSerializer(credits, many=True).data,
+        })

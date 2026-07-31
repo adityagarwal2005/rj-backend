@@ -37,7 +37,8 @@ class PaymentTests(APITestCase):
         response = self.client.post(reverse("payment-initiate"), {"order_id": self.order.id, "gateway": "cod"})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_initiate_razorpay_not_implemented_yet(self):
+    @override_settings(RAZORPAY_KEY_ID="", RAZORPAY_KEY_SECRET="")
+    def test_initiate_razorpay_rejected_when_not_configured(self):
         response = self.client.post(reverse("payment-initiate"), {"order_id": self.order.id, "gateway": "razorpay"})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 

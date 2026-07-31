@@ -1,7 +1,8 @@
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
 from apps.core.permissions import IsAdmin
@@ -177,3 +178,25 @@ class OrderViewSet(viewsets.ModelViewSet):
         order.save(update_fields=["status"])
         notification_services.notify_order_status_change(order)
         return api_success(OrderSerializer(order).data, message="Order status updated successfully.")
+
+
+class ProcessAbandonedOrdersView(APIView):
+    """
+    POST /api/orders/process-abandoned/ - sends abandoned-cart reminders and
+    auto-cancels stale unpaid orders (see apps.orders.services). Meant to be
+    called periodically by an external scheduler (e.g. a free cron-ping
+    service), since this project has no background worker infra - protected
+    by a shared secret header instead of user auth, since the caller isn't a
+    logged-in user.
+    """
+
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        secret = request.headers.get("X-Cron-Secret", "")
+        if not settings.CRON_SECRET or secret != settings.CRON_SECRET:
+            return api_error("Forbidden.", status=status.HTTP_403_FORBIDDEN)
+
+        reminded = services.send_abandoned_order_reminders()
+        cancelled = services.auto_cancel_stale_pending_orders()
+        return api_success({"reminded": reminded, "cancelled": cancelled})
