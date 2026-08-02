@@ -14,6 +14,7 @@ from django.dispatch import receiver
 
 from apps.notifications import services as notification_services
 from apps.orders import referrals
+from apps.orders import services as order_services
 from apps.orders.models import OrderStatus
 from apps.payments.models import Payment, PaymentStatus
 
@@ -29,5 +30,6 @@ def confirm_order_on_payment_success(sender, instance: Payment, **kwargs):
 
     order.status = OrderStatus.CONFIRMED
     order.save(update_fields=["status"])
+    order_services.record_status_change(order)
     notification_services.notify_order_status_change(order)
     referrals.grant_referrer_reward_if_eligible(order)

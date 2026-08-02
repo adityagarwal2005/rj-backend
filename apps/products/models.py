@@ -1,6 +1,7 @@
 from decimal import Decimal
 
-from django.core.validators import MinValueValidator
+from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.text import slugify
 
@@ -96,3 +97,26 @@ class ProductImage(TimeStampedModel):
 
     def __str__(self):
         return f"Image for {self.product.name}"
+
+
+class Review(TimeStampedModel):
+    """
+    A rating/review tied to a specific delivered order - not a free-for-all
+    review box, so every review on the site is from someone who actually
+    received the product (see apps.products.services.create_review).
+    """
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="reviews")
+    order = models.ForeignKey("orders.Order", on_delete=models.CASCADE, related_name="reviews")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="reviews")
+    rating = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(5)])
+    comment = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["order", "product"], name="one_review_per_order_product"),
+        ]
+
+    def __str__(self):
+        return f"{self.rating}★ {self.product.name} by {self.user.email}"

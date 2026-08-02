@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.orders.models import Address, Cart, CartItem, Order, OrderItem
+from apps.orders.models import Address, Cart, CartItem, Order, OrderItem, OrderStatusHistory
 
 
 class OrderItemInline(admin.TabularInline):
@@ -9,15 +9,22 @@ class OrderItemInline(admin.TabularInline):
     readonly_fields = ["product", "product_name", "unit_price", "quantity"]
 
 
+class OrderStatusHistoryInline(admin.TabularInline):
+    model = OrderStatusHistory
+    extra = 0
+    readonly_fields = ["status", "created_at"]
+    can_delete = False
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = [
         "id", "user", "status", "total_amount", "referral_discount_amount",
-        "abandoned_reminder_sent_at", "created_at",
+        "is_gift", "abandoned_reminder_sent_at", "created_at",
     ]
-    list_filter = ["status"]
+    list_filter = ["status", "is_gift"]
     search_fields = ["id", "user__email"]
-    inlines = [OrderItemInline]
+    inlines = [OrderItemInline, OrderStatusHistoryInline]
 
 
 @admin.register(Address)

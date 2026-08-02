@@ -107,6 +107,8 @@ class Order(UUIDPrimaryKeyModel, TimeStampedModel):
     # Set once an abandoned-cart reminder has been sent for this order, so it
     # only ever gets nudged once - see apps.orders.services.send_abandoned_order_reminders.
     abandoned_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    is_gift = models.BooleanField(default=False)
+    gift_message = models.TextField(blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -114,6 +116,24 @@ class Order(UUIDPrimaryKeyModel, TimeStampedModel):
 
     def __str__(self):
         return f"Order {self.id}"
+
+
+class OrderStatusHistory(TimeStampedModel):
+    """
+    One row per status the order has actually passed through, so the
+    customer-facing timeline shows real dates instead of just the current
+    status - see apps.orders.services.record_status_change.
+    """
+
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="status_history")
+    status = models.CharField(max_length=20, choices=OrderStatus.choices)
+
+    class Meta:
+        ordering = ["created_at"]
+        verbose_name_plural = "Order status histories"
+
+    def __str__(self):
+        return f"{self.order_id} -> {self.status}"
 
 
 class OrderItem(TimeStampedModel):

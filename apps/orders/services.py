@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from apps.notifications import services as notification_services
 from apps.orders import referrals
-from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatus
+from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatus, OrderStatusHistory
 from apps.orders.pricing import discount_for_code, is_known_code
 from apps.products import services as product_services
 
@@ -17,6 +17,11 @@ from apps.products import services as product_services
 # give up entirely and release its stock back to the catalog.
 ABANDONED_REMINDER_DELAY = timedelta(hours=2)
 STALE_ORDER_CANCEL_DELAY = timedelta(hours=48)
+
+
+def record_status_change(order: Order) -> None:
+    """Logs the order's *current* status as a timeline entry - call this right after any order.save() that changes status."""
+    OrderStatusHistory.objects.create(order=order, status=order.status)
 
 
 def get_or_create_cart(user) -> Cart:
@@ -64,7 +69,9 @@ def remove_promo_code(user) -> Cart:
 
 
 @transaction.atomic
-def create_order_from_cart(user, address=None, notes: str = "") -> Order:
+def create_order_from_cart(
+    user, address=None, notes: str = "", is_gift: bool = False, gift_message: str = "",
+) -> Order:
     """
     address=None is the WhatsApp checkout path: the order (and its stock
     reservation) is created immediately, but stays OrderStatus.AWAITING_DETAILS
@@ -89,7 +96,10 @@ def create_order_from_cart(user, address=None, notes: str = "") -> Order:
         subtotal_amount=0,
         total_amount=0,
         notes=notes,
+        is_gift=is_gift,
+        gift_message=gift_message if is_gift else "",
     )
+    record_status_change(order)
     subtotal_amount = Decimal("0")
 
     for cart_item in cart_items:
@@ -152,6 +162,7 @@ def cancel_order(order: Order) -> Order:
 
     order.status = OrderStatus.CANCELLED
     order.save(update_fields=["status"])
+    record_status_change(order)
     notification_services.notify_order_status_change(order)
     return order
 

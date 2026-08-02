@@ -1,18 +1,22 @@
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.permissions import AllowAny
 
 from apps.core.pagination import StandardResultsSetPagination
 from apps.core.permissions import IsAdminOrReadOnly
-from apps.core.response import api_success
+from apps.core.response import api_error, api_success
 from apps.products import services
 from apps.products.filters import ProductFilter
 from apps.products.models import Category
 from apps.products.serializers import (
     CategorySerializer,
+    CreateReviewSerializer,
     ProductDetailSerializer,
     ProductImageSerializer,
     ProductListSerializer,
+    ReviewSerializer,
 )
 
 
@@ -118,3 +122,31 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(product=product)
         return api_success(serializer.data, message="Image uploaded successfully.", status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "post"], url_path="reviews", permission_classes=[AllowAny])
+    def reviews(self, request, slug=None):
+        product = self.get_object()
+        if request.method == "GET":
+            queryset = product.reviews.select_related("user")
+            page = self.paginate_queryset(queryset)
+            serializer = ReviewSerializer(page if page is not None else queryset, many=True)
+            if page is not None:
+                return self.get_paginated_response(serializer.data)
+            return api_success(serializer.data)
+
+        if not request.user.is_authenticated:
+            return api_error("You must be logged in to leave a review.", status=status.HTTP_401_UNAUTHORIZED)
+
+        serializer = CreateReviewSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            review = services.create_review(
+                request.user,
+                product,
+                serializer.validated_data["order_id"],
+                serializer.validated_data["rating"],
+                serializer.validated_data.get("comment", ""),
+            )
+        except DjangoValidationError as exc:
+            return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
+        return api_success(ReviewSerializer(review).data, message="Thanks for your review!", status=status.HTTP_201_CREATED)

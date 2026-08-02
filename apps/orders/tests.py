@@ -313,6 +313,97 @@ class AbandonedOrderTests(APITestCase):
         self.assertEqual(self.order.status, OrderStatus.PENDING)
 
 
+class GiftOrderTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=200, stock_quantity=10)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+
+    def test_checkout_with_gift_details(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {
+            "address_id": self.address.id, "is_gift": True, "gift_message": "Happy birthday!",
+        })
+        data = response.data["data"]
+        self.assertTrue(data["is_gift"])
+        self.assertEqual(data["gift_message"], "Happy birthday!")
+
+    def test_gift_message_dropped_when_not_a_gift(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {
+            "address_id": self.address.id, "is_gift": False, "gift_message": "Should not be saved",
+        })
+        data = response.data["data"]
+        self.assertFalse(data["is_gift"])
+        self.assertEqual(data["gift_message"], "")
+
+    def test_checkout_defaults_to_not_a_gift(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        data = response.data["data"]
+        self.assertFalse(data["is_gift"])
+        self.assertEqual(data["gift_message"], "")
+
+
+class OrderStatusHistoryTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.admin = User.objects.create_user(
+            email="admin@example.com", password="StrongPass123!", full_name="Admin", role="admin"
+        )
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=200, stock_quantity=10)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+
+    def test_order_creation_logs_initial_status(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        history = response.data["data"]["status_history"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["status"], "pending")
+
+    def test_payment_confirmation_logs_status_change(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        order_id = order_response.data["data"]["id"]
+
+        payment = Payment.objects.create(order_id=order_id, gateway="manual", amount=200)
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+
+        detail_response = self.client.get(reverse("order-detail", args=[order_id]))
+        statuses = [entry["status"] for entry in detail_response.data["data"]["status_history"]]
+        self.assertEqual(statuses, ["pending", "confirmed"])
+
+    def test_admin_status_update_logs_change(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        order_id = order_response.data["data"]["id"]
+
+        self.client.force_authenticate(user=self.admin)
+        response = self.client.patch(reverse("order-update-status", args=[order_id]), {"status": "shipped"})
+        statuses = [entry["status"] for entry in response.data["data"]["status_history"]]
+        self.assertEqual(statuses, ["pending", "shipped"])
+
+    def test_cancellation_logs_status_change(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        order_id = order_response.data["data"]["id"]
+
+        response = self.client.post(reverse("order-cancel", args=[order_id]))
+        statuses = [entry["status"] for entry in response.data["data"]["status_history"]]
+        self.assertEqual(statuses, ["pending", "cancelled"])
+
+
 class ProcessAbandonedOrdersEndpointTests(APITestCase):
     @override_settings(CRON_SECRET="test-secret")
     def test_rejects_missing_or_wrong_secret(self):

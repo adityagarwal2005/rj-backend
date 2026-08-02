@@ -140,9 +140,10 @@ class OrderViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
+        base = Order.objects.select_related("address").prefetch_related("items", "status_history", "reviews")
         if self.request.user.is_admin:
-            return Order.objects.select_related("address").prefetch_related("items")
-        return Order.objects.filter(user=self.request.user).select_related("address").prefetch_related("items")
+            return base
+        return base.filter(user=self.request.user)
 
     def create(self, request, *args, **kwargs):
         serializer = CreateOrderSerializer(data=request.data, context={"request": request})
@@ -152,6 +153,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 request.user,
                 serializer.validated_data["address"],
                 serializer.validated_data.get("notes", ""),
+                is_gift=serializer.validated_data.get("is_gift", False),
+                gift_message=serializer.validated_data.get("gift_message", ""),
             )
         except DjangoValidationError as exc:
             return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
@@ -187,6 +190,7 @@ class OrderViewSet(viewsets.ModelViewSet):
             order = services.cancel_order(order)
         except DjangoValidationError as exc:
             return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
+        getattr(order, "_prefetched_objects_cache", {}).pop("status_history", None)
         return api_success(OrderSerializer(order).data, message="Order cancelled successfully.")
 
     @action(detail=True, methods=["patch"], url_path="status", permission_classes=[IsAuthenticated, IsAdmin])
@@ -196,7 +200,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         order.status = serializer.validated_data["status"]
         order.save(update_fields=["status"])
+        services.record_status_change(order)
         notification_services.notify_order_status_change(order)
+        getattr(order, "_prefetched_objects_cache", {}).pop("status_history", None)
         return api_success(OrderSerializer(order).data, message="Order status updated successfully.")
 
 

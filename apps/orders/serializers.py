@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.orders import referrals
-from apps.orders.models import Address, Cart, CartItem, Order, OrderItem
+from apps.orders.models import Address, Cart, CartItem, Order, OrderItem, OrderStatusHistory
 from apps.products.models import Product
 
 # Early-stage business constraint: delivery is only available within Jaipur.
@@ -82,27 +82,42 @@ class OrderItemSerializer(serializers.ModelSerializer):
         fields = ["id", "product", "product_name", "unit_price", "quantity", "subtotal"]
 
 
+class OrderStatusHistorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OrderStatusHistory
+        fields = ["status", "created_at"]
+
+
 class OrderSerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     # Null while a WhatsApp-checkout order is still awaiting its address - see
     # OrderStatus.AWAITING_DETAILS.
     address = AddressSerializer(read_only=True, allow_null=True)
+    status_history = OrderStatusHistorySerializer(many=True, read_only=True)
+    reviewed_product_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
             "id", "status", "subtotal_amount", "discount_percentage", "discount_amount",
-            "referral_discount_amount", "total_amount", "notes", "address", "items", "created_at",
+            "referral_discount_amount", "total_amount", "notes", "is_gift", "gift_message",
+            "address", "items", "status_history", "reviewed_product_ids", "created_at",
         ]
         read_only_fields = [
             "id", "status", "subtotal_amount", "discount_percentage", "discount_amount",
-            "referral_discount_amount", "total_amount", "items", "created_at",
+            "referral_discount_amount", "total_amount", "items", "status_history",
+            "reviewed_product_ids", "created_at",
         ]
+
+    def get_reviewed_product_ids(self, obj):
+        return list(obj.reviews.values_list("product_id", flat=True))
 
 
 class CreateOrderSerializer(serializers.Serializer):
     address_id = serializers.PrimaryKeyRelatedField(source="address", queryset=Address.objects.all())
     notes = serializers.CharField(required=False, allow_blank=True, default="")
+    is_gift = serializers.BooleanField(required=False, default=False)
+    gift_message = serializers.CharField(required=False, allow_blank=True, default="", max_length=500)
 
     def validate_address_id(self, address):
         request = self.context["request"]

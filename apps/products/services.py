@@ -6,7 +6,7 @@ other apps (orders) can reuse stock logic without importing view code.
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from apps.products.models import Product
+from apps.products.models import Product, Review
 
 
 def visible_products_queryset(user):
@@ -35,3 +35,17 @@ def restore_stock(product: Product, quantity: int) -> Product:
     locked_product.stock_quantity += quantity
     locked_product.save(update_fields=["stock_quantity"])
     return locked_product
+
+
+def create_review(user, product: Product, order_id, rating: int, comment: str) -> Review:
+    """Only someone with a delivered order containing this product can review it - see apps.products.models.Review."""
+    from apps.orders.models import Order, OrderStatus
+
+    order = Order.objects.filter(id=order_id, user=user, status=OrderStatus.DELIVERED).first()
+    if order is None:
+        raise ValidationError("We couldn't find a delivered order matching that.")
+    if not order.items.filter(product=product).exists():
+        raise ValidationError("This product wasn't part of that order.")
+    if Review.objects.filter(order=order, product=product).exists():
+        raise ValidationError("You've already reviewed this product for that order.")
+    return Review.objects.create(order=order, product=product, user=user, rating=rating, comment=comment)
