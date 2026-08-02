@@ -6,7 +6,10 @@ name: Process abandoned orders
 # involved; this runs entirely on GitHub's own free Actions scheduler.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Every 5 min (not 10) so an occasional skipped/delayed tick from
+    # GitHub's own scheduler still leaves margin under Render's ~15 min
+    # spin-down window.
+    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -14,7 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call process-abandoned endpoint
+        # Render's free plan spins the app down after ~15 min idle, so the
+        # first ping after a gap has to wait through a cold start (can take
+        # 30-60s+). --retry/--retry-all-errors covers the transient 502/503s
+        # Render's proxy returns mid-boot; --max-time is generous so a slow
+        # wake-up isn't mistaken for a real failure.
         run: |
           curl --fail -sS -X POST "https://api.rajwaditukda.in/api/orders/process-abandoned/" \
             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            --retry 5 --retry-all-errors --retry-delay 10 --max-time 90 \
             -w "\nHTTP %{http_code}\n"
