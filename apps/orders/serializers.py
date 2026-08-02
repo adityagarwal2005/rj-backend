@@ -76,10 +76,11 @@ class CartSerializer(serializers.ModelSerializer):
 
 class OrderItemSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    product_slug = serializers.SlugField(source="product.slug", read_only=True, default=None)
 
     class Meta:
         model = OrderItem
-        fields = ["id", "product", "product_name", "unit_price", "quantity", "subtotal"]
+        fields = ["id", "product", "product_name", "product_slug", "unit_price", "quantity", "subtotal"]
 
 
 class OrderStatusHistorySerializer(serializers.ModelSerializer):
