@@ -5,7 +5,7 @@ from django.core.validators import MinValueValidator
 from django.db import models
 
 from apps.core.models import TimeStampedModel, UUIDPrimaryKeyModel
-from apps.orders.pricing import calculate_discount
+from apps.orders.pricing import discount_for_code
 from apps.products.models import Product
 
 
@@ -33,6 +33,10 @@ class Cart(TimeStampedModel):
     """Every user has exactly one running cart, created lazily on first use."""
 
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="cart")
+    # Set via POST /api/orders/cart/promo/ - the discount is code-gated (see
+    # apps.orders.pricing) rather than automatic, so the customer has to
+    # type it and watch the total actually drop.
+    applied_promo_code = models.CharField(max_length=20, blank=True)
 
     def __str__(self):
         return f"Cart({self.user.email})"
@@ -43,11 +47,11 @@ class Cart(TimeStampedModel):
 
     @property
     def discount_percentage(self):
-        return calculate_discount(self.subtotal_amount)[0]
+        return discount_for_code(self.applied_promo_code, self.subtotal_amount)[0]
 
     @property
     def discount_amount(self):
-        return calculate_discount(self.subtotal_amount)[1]
+        return discount_for_code(self.applied_promo_code, self.subtotal_amount)[1]
 
     @property
     def total_amount(self):
