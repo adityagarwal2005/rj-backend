@@ -128,7 +128,12 @@ def create_order_from_cart(
     order.discount_percentage = discount_percentage
     order.discount_amount = discount_amount
     order.referral_discount_amount = referral_discount_amount
-    order.total_amount = subtotal_amount - discount_amount - referral_discount_amount
+    # Clamp rather than trust the arithmetic: a stacked promo code + referral
+    # discount + referral credit could otherwise drive this negative if any
+    # of those thresholds change in the future (total_amount has no
+    # server-side floor beyond this - see the model's MinValueValidator,
+    # which full_clean() never runs here to check).
+    order.total_amount = max(Decimal("0"), subtotal_amount - discount_amount - referral_discount_amount)
     # This business is prepaid-only for now, so an order set to PENDING isn't
     # confirmed until payment is manually verified (see apps.payments.signals,
     # which flips PENDING/AWAITING_DETAILS orders to CONFIRMED on payment success).

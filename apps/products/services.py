@@ -5,13 +5,29 @@ other apps (orders) can reuse stock logic without importing view code.
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Avg, Count
 
 from apps.products.models import Product, Review
 
 
 def visible_products_queryset(user):
-    """Admins see every product; everyone else only sees active, in-catalog items."""
-    queryset = Product.objects.select_related("category").prefetch_related("images")
+    """
+    Admins see every product; everyone else only sees active, in-catalog items.
+
+    Annotates average_rating/review_count here (one query for the whole page)
+    rather than each serializer row running its own aggregate query - see
+    apps.products.serializers.ReviewStatsMixin.
+    """
+    # Explicit order_by: combining annotate()'s GROUP BY with Product's Meta
+    # ordering alone is enough to make pagination emit an
+    # UnorderedObjectListWarning (the aggregate can make Django lose track of
+    # the implicit default ordering), so state it outright instead.
+    queryset = (
+        Product.objects.select_related("category")
+        .prefetch_related("images")
+        .annotate(average_rating=Avg("reviews__rating"), review_count=Count("reviews"))
+        .order_by("-created_at")
+    )
     if user.is_authenticated and user.is_admin:
         return queryset
     return queryset.filter(is_active=True, category__is_active=True)

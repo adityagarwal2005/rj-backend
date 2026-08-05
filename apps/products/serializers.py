@@ -19,14 +19,22 @@ class ProductImageSerializer(serializers.ModelSerializer):
 
 
 class ReviewStatsMixin:
-    """Shared by List/Detail serializers so rating stats stay in sync everywhere a product appears."""
+    """
+    Shared by List/Detail serializers so rating stats stay in sync everywhere a
+    product appears. Reads the average_rating/review_count annotations added
+    by apps.products.services.visible_products_queryset (one query for the
+    whole page) instead of running a fresh aggregate per row here.
+    """
 
     def get_average_rating(self, obj):
-        average = obj.reviews.aggregate(value=Avg("rating"))["value"]
+        average = getattr(obj, "average_rating", None)
+        if average is None:
+            average = obj.reviews.aggregate(value=Avg("rating"))["value"]
         return round(average, 1) if average is not None else None
 
     def get_review_count(self, obj):
-        return obj.reviews.count()
+        count = getattr(obj, "review_count", None)
+        return count if count is not None else obj.reviews.count()
 
 
 class ProductListSerializer(ReviewStatsMixin, serializers.ModelSerializer):
