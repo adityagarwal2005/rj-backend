@@ -1,15 +1,15 @@
 name: Process abandoned orders
 
-# Pings the abandoned-order endpoint on a schedule so unpaid orders get a
-# reminder and stale ones get released back to stock - see
-# apps/orders/views.py::ProcessAbandonedOrdersView. No third-party service
-# involved; this runs entirely on GitHub's own free Actions scheduler.
+# Runs the abandoned-order business logic (2h reminder / 48h auto-cancel
+# window - see apps/orders/views.py::ProcessAbandonedOrdersView). Keeping
+# Render awake is UptimeRobot's job now (pings GET /api/health/ every 5 min,
+# far more reliably than GitHub's own scheduler/runner pool - see the health
+# check endpoint in apps/core/views.py), so this only needs to run often
+# enough to keep the reminder/cancel windows reasonably tight; it doesn't
+# need to race Render's spin-down anymore.
 on:
   schedule:
-    # Every 5 min (not 10) so an occasional skipped/delayed tick from
-    # GitHub's own scheduler still leaves margin under Render's ~15 min
-    # spin-down window.
-    - cron: "*/5 * * * *"
+    - cron: "*/20 * * * *"
   workflow_dispatch: {}
 
 jobs:
@@ -17,11 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call process-abandoned endpoint
-        # Render's free plan spins the app down after ~15 min idle, so the
-        # first ping after a gap has to wait through a cold start (can take
-        # 30-60s+). --retry/--retry-all-errors covers the transient 502/503s
-        # Render's proxy returns mid-boot; --max-time is generous so a slow
-        # wake-up isn't mistaken for a real failure.
+        # --retry/--retry-all-errors covers transient 502/503s if Render
+        # ever is cold anyway; --max-time is generous so a slow response
+        # isn't mistaken for a real failure.
         run: |
           curl --fail -sS -X POST "https://api.rajwaditukda.in/api/orders/process-abandoned/" \
             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
