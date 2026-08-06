@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.products.models import Category, Product, ProductImage, Review
+from apps.products.models import Category, Product, ProductImage, Review, WishlistItem
 
 
 class ProductImageInline(admin.TabularInline):
@@ -29,3 +29,9 @@ class ReviewAdmin(admin.ModelAdmin):
     list_display = ["product", "user", "rating", "order", "created_at"]
     list_filter = ["rating"]
     search_fields = ["product__name", "user__email"]
+
+
+@admin.register(WishlistItem)
+class WishlistItemAdmin(admin.ModelAdmin):
+    list_display = ["user", "product", "created_at"]
+    search_fields = ["user__email", "product__name"]

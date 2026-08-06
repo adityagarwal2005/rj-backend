@@ -37,7 +37,19 @@ class ReviewStatsMixin:
         return count if count is not None else obj.reviews.count()
 
 
-class ProductListSerializer(ReviewStatsMixin, serializers.ModelSerializer):
+class WishlistStatusMixin:
+    """
+    Shared by List/Detail serializers. Reads a `wishlisted_product_ids` set
+    the view puts in context (one query per page, see
+    ProductViewSet.get_serializer_context) instead of querying per row.
+    Always False for anonymous requests - context won't have the key set.
+    """
+
+    def get_is_wishlisted(self, obj):
+        return obj.id in self.context.get("wishlisted_product_ids", set())
+
+
+class ProductListSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers.ModelSerializer):
     """Lightweight representation for catalog/listing pages."""
 
     category = serializers.CharField(source="category.name", read_only=True)
@@ -45,13 +57,14 @@ class ProductListSerializer(ReviewStatsMixin, serializers.ModelSerializer):
     effective_price = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
+    is_wishlisted = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
         fields = [
             "id", "name", "slug", "category", "price", "discount_price",
             "effective_price", "weight_label", "stock_quantity", "in_stock",
-            "is_featured", "primary_image", "average_rating", "review_count",
+            "is_featured", "primary_image", "average_rating", "review_count", "is_wishlisted",
         ]
 
     def get_primary_image(self, obj):
@@ -61,7 +74,7 @@ class ProductListSerializer(ReviewStatsMixin, serializers.ModelSerializer):
         return ProductImageSerializer(image).data["image"] if image else None
 
 
-class ProductDetailSerializer(ReviewStatsMixin, serializers.ModelSerializer):
+class ProductDetailSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers.ModelSerializer):
     category = CategorySerializer(read_only=True)
     category_id = serializers.PrimaryKeyRelatedField(
         source="category", queryset=Category.objects.all(), write_only=True
@@ -70,6 +83,7 @@ class ProductDetailSerializer(ReviewStatsMixin, serializers.ModelSerializer):
     effective_price = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
+    is_wishlisted = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -77,7 +91,7 @@ class ProductDetailSerializer(ReviewStatsMixin, serializers.ModelSerializer):
             "id", "name", "slug", "description", "ingredients", "category", "category_id",
             "price", "discount_price", "effective_price", "weight_label",
             "stock_quantity", "in_stock", "is_active", "is_featured",
-            "images", "average_rating", "review_count", "created_at", "updated_at",
+            "images", "average_rating", "review_count", "is_wishlisted", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "slug", "created_at", "updated_at"]
 

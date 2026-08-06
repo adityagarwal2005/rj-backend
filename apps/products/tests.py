@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.orders.models import Address, Order, OrderItem, OrderStatus
-from apps.products.models import Category, Product, Review
+from apps.products.models import Category, Product, Review, WishlistItem
 from apps.users.models import User
 
 
@@ -48,6 +48,66 @@ class ProductTests(APITestCase):
         self.product.save()
         response = self.client.get(reverse("product-list"))
         self.assertEqual(response.data["data"]["count"], 0)
+
+    def test_product_list_shows_is_wishlisted_false_for_anonymous(self):
+        response = self.client.get(reverse("product-list"))
+        self.assertFalse(response.data["data"]["results"][0]["is_wishlisted"])
+
+
+class WishlistTests(APITestCase):
+    def setUp(self):
+        self.category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=self.category, name="Kunafa Chocolate", price=200, stock_quantity=10)
+        self.other_product = Product.objects.create(category=self.category, name="Other Bar", price=150, stock_quantity=10)
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.client.force_authenticate(user=self.user)
+
+    def test_anonymous_cannot_wishlist(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_add_to_wishlist(self):
+        response = self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertTrue(response.data["data"]["is_wishlisted"])
+        self.assertTrue(WishlistItem.objects.filter(user=self.user, product=self.product).exists())
+
+    def test_adding_twice_does_not_duplicate(self):
+        self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        self.assertEqual(WishlistItem.objects.filter(user=self.user, product=self.product).count(), 1)
+
+    def test_remove_from_wishlist(self):
+        self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        response = self.client.delete(reverse("product-wishlist", args=[self.product.slug]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["data"]["is_wishlisted"])
+        self.assertFalse(WishlistItem.objects.filter(user=self.user, product=self.product).exists())
+
+    def test_product_detail_reflects_wishlist_status(self):
+        self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        response = self.client.get(reverse("product-detail", args=[self.product.slug]))
+        self.assertTrue(response.data["data"]["is_wishlisted"])
+
+    def test_wishlist_is_scoped_per_user(self):
+        other_user = User.objects.create_user(email="other@example.com", password="StrongPass123!", full_name="Other")
+        self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        self.client.force_authenticate(user=other_user)
+        response = self.client.get(reverse("product-detail", args=[self.product.slug]))
+        self.assertFalse(response.data["data"]["is_wishlisted"])
+
+    def test_my_wishlist_lists_only_wishlisted_products_most_recent_first(self):
+        self.client.post(reverse("product-wishlist", args=[self.product.slug]))
+        self.client.post(reverse("product-wishlist", args=[self.other_product.slug]))
+        response = self.client.get(reverse("product-my-wishlist"))
+        names = [item["name"] for item in response.data["data"]["results"]]
+        self.assertEqual(names, ["Other Bar", "Kunafa Chocolate"])
+
+    def test_my_wishlist_requires_auth(self):
+        self.client.force_authenticate(user=None)
+        response = self.client.get(reverse("product-my-wishlist"))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
 
 class ReviewTests(APITestCase):

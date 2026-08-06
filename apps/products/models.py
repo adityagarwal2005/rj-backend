@@ -120,3 +120,19 @@ class Review(TimeStampedModel):
 
     def __str__(self):
         return f"{self.rating}★ {self.product.name} by {self.user.email}"
+
+
+class WishlistItem(TimeStampedModel):
+    """A product a signed-in customer has saved for later - see apps.products.views.ProductViewSet.wishlist."""
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="wishlist_items")
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="wishlisted_by")
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["user", "product"], name="one_wishlist_entry_per_user_product"),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} ♥ {self.product.name}"
