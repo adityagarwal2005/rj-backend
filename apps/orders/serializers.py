@@ -31,10 +31,13 @@ class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     unit_price = serializers.DecimalField(source="product.effective_price", max_digits=8, decimal_places=2, read_only=True)
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    # So the cart UI can cap +/- at what's actually in stock instead of only
+    # discovering a shortfall at checkout - see apps.products.services.decrease_stock.
+    stock_quantity = serializers.IntegerField(source="product.stock_quantity", read_only=True)
 
     class Meta:
         model = CartItem
-        fields = ["id", "product", "product_name", "unit_price", "quantity", "subtotal"]
+        fields = ["id", "product", "product_name", "unit_price", "quantity", "subtotal", "stock_quantity"]
         read_only_fields = ["id"]
 
 

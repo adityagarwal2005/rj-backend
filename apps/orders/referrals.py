@@ -10,6 +10,8 @@ apps.orders.models, which pricing.py is deliberately kept free of.
 
 from decimal import Decimal
 
+from django.db import transaction
+
 REFEREE_FIRST_ORDER_DISCOUNT = Decimal("30")
 REFERRER_REWARD_AMOUNT = Decimal("30")
 
@@ -27,10 +29,13 @@ def referee_discount_for(user, is_first_order: bool) -> Decimal:
     return REFEREE_FIRST_ORDER_DISCOUNT
 
 
-def available_credit_for(user):
+def available_credit_for(user, for_update: bool = False):
     from apps.users.models import ReferralCredit
 
-    return ReferralCredit.objects.filter(user=user, is_used=False).order_by("created_at").first()
+    queryset = ReferralCredit.objects.filter(user=user, is_used=False).order_by("created_at")
+    if for_update:
+        queryset = queryset.select_for_update()
+    return queryset.first()
 
 
 def total_referral_discount_for(user) -> Decimal:
@@ -48,21 +53,30 @@ def grant_referrer_reward_if_eligible(order) -> None:
     """
     from apps.notifications import services as notification_services
     from apps.orders.models import Order, OrderStatus
-    from apps.users.models import ReferralCredit
+    from apps.users.models import ReferralCredit, User
 
-    user = order.user
-    if user.referred_by_id is None or user.referral_reward_granted:
-        return
+    # This runs from the Payment post_save signal, which can fire from a
+    # plain (non-atomic) admin save as well as from confirm_payment/
+    # confirm_razorpay_order_payment - wrap in our own atomic block so the
+    # row lock below is always valid, and always closes the same window: two
+    # near-simultaneous payment confirmations (client callback racing the
+    # gateway webhook, or two separate orders for the same referred user)
+    # could otherwise both reach here with referral_reward_granted still
+    # False and both grant the reward.
+    with transaction.atomic():
+        user = User.objects.select_for_update().get(pk=order.user_id)
+        if user.referred_by_id is None or user.referral_reward_granted:
+            return
 
-    already_confirmed_before = (
-        Order.objects.filter(user=user, status=OrderStatus.CONFIRMED).exclude(id=order.id).exists()
-    )
-    if already_confirmed_before:
-        return
+        already_confirmed_before = (
+            Order.objects.filter(user=user, status=OrderStatus.CONFIRMED).exclude(id=order.id).exists()
+        )
+        if already_confirmed_before:
+            return
 
-    ReferralCredit.objects.create(user=user.referred_by, amount=REFERRER_REWARD_AMOUNT)
-    user.referral_reward_granted = True
-    user.save(update_fields=["referral_reward_granted"])
+        ReferralCredit.objects.create(user=user.referred_by, amount=REFERRER_REWARD_AMOUNT)
+        user.referral_reward_granted = True
+        user.save(update_fields=["referral_reward_granted"])
 
     notification_services.create_notification(
         user.referred_by,

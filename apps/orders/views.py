@@ -1,3 +1,5 @@
+import hmac
+
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
@@ -99,9 +101,12 @@ class CartItemListView(APIView):
     def post(self, request):
         serializer = AddCartItemSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        item = services.add_item_to_cart(
-            request.user, serializer.validated_data["product"], serializer.validated_data["quantity"]
-        )
+        try:
+            item = services.add_item_to_cart(
+                request.user, serializer.validated_data["product"], serializer.validated_data["quantity"]
+            )
+        except DjangoValidationError as exc:
+            return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
         cart = item.cart
         return api_success(CartSerializer(cart).data, message="Item added to cart.", status=status.HTTP_201_CREATED)
 
@@ -118,6 +123,8 @@ class CartItemDetailView(APIView):
             item = services.update_cart_item_quantity(request.user, item_id, serializer.validated_data["quantity"])
         except CartItem.DoesNotExist:
             return api_error("Cart item not found.", status=status.HTTP_404_NOT_FOUND)
+        except DjangoValidationError as exc:
+            return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
         return api_success(CartSerializer(item.cart).data, message="Cart updated successfully.")
 
     def delete(self, request, item_id):
@@ -166,6 +173,18 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        # OrderSerializer only marks the identity/pricing fields read-only,
+        # which left notes/is_gift/gift_message editable via the generic
+        # PATCH /orders/{id}/ route DRF wires up automatically - a customer
+        # could silently rewrite them after checkout (even post-delivery)
+        # with no audit trail, bypassing the dedicated cancel/status actions
+        # below. Order mutation should only ever go through those.
+        return api_error(
+            "Orders can't be edited directly - use the cancel or status actions.",
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
 
     @action(detail=False, methods=["post"], url_path="checkout-whatsapp")
     def checkout_whatsapp(self, request):
@@ -220,7 +239,7 @@ class ProcessAbandonedOrdersView(APIView):
 
     def post(self, request):
         secret = request.headers.get("X-Cron-Secret", "")
-        if not settings.CRON_SECRET or secret != settings.CRON_SECRET:
+        if not settings.CRON_SECRET or not hmac.compare_digest(secret, settings.CRON_SECRET):
             return api_error("Forbidden.", status=status.HTTP_403_FORBIDDEN)
 
         reminded = services.send_abandoned_order_reminders()

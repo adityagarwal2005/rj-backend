@@ -153,15 +153,22 @@ def _active_gateways() -> dict:
     return gateways
 
 
+@transaction.atomic
 def confirm_razorpay_order_payment(gateway_order_id: str, gateway_payment_id: str, succeeded: bool) -> Payment | None:
     """
     Used by the Razorpay dashboard webhook (server-to-server), which is a
     reliability safety net alongside the client-side checkout callback: if a
     customer's browser closes right after paying, before the checkout
     callback POSTs to confirm_payment() above, this still confirms the order.
+
+    Razorpay explicitly retries webhook deliveries, and this can also race
+    the client-side callback for the same payment - select_for_update plus
+    the PENDING check makes a duplicate/retried call a no-op instead of
+    saving (and re-triggering the order-confirmation signal) twice.
     """
     payment = (
-        Payment.objects.filter(gateway=PaymentGatewayChoice.RAZORPAY, gateway_order_id=gateway_order_id)
+        Payment.objects.select_for_update()
+        .filter(gateway=PaymentGatewayChoice.RAZORPAY, gateway_order_id=gateway_order_id)
         .order_by("-created_at")
         .first()
     )
@@ -190,6 +197,14 @@ def initiate_payment(order, gateway_code: str) -> tuple[Payment, dict]:
 
 @transaction.atomic
 def confirm_payment(payment: Payment, callback_payload: dict) -> Payment:
+    # Re-fetch under a row lock: the view loads `payment` before calling in,
+    # so a near-simultaneous duplicate/retried callback for the same payment
+    # could otherwise both see PENDING and both flip status, double-firing
+    # the post_save signal (order confirmation, referral reward - see
+    # apps.payments.signals).
+    payment = Payment.objects.select_for_update().get(pk=payment.pk)
+    if payment.status != PaymentStatus.PENDING:
+        return payment
     gateway = get_gateway(payment.gateway)
     is_verified = gateway.verify_payment(payment, callback_payload)
     payment.status = PaymentStatus.SUCCESS if is_verified else PaymentStatus.FAILED

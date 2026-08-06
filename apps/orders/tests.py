@@ -29,6 +29,28 @@ class CartAndCheckoutTests(APITestCase):
         response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(len(response.data["data"]["items"]), 1)
+        self.assertEqual(response.data["data"]["items"][0]["stock_quantity"], 5)
+
+    def test_cannot_add_more_than_available_stock(self):
+        response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 6})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        cart_response = self.client.get(reverse("cart-detail"))
+        self.assertEqual(len(cart_response.data["data"]["items"]), 0)
+
+    def test_cannot_add_more_than_stock_across_two_calls(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 3})
+        response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 3})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        cart_response = self.client.get(reverse("cart-detail"))
+        self.assertEqual(cart_response.data["data"]["items"][0]["quantity"], 3)
+
+    def test_cannot_update_cart_item_past_available_stock(self):
+        add_response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
+        item_id = add_response.data["data"]["items"][0]["id"]
+        response = self.client.patch(reverse("cart-item-detail", args=[item_id]), {"quantity": 6})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        cart_response = self.client.get(reverse("cart-detail"))
+        self.assertEqual(cart_response.data["data"]["items"][0]["quantity"], 2)
 
     def test_checkout_decrements_stock_and_clears_cart(self):
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
@@ -348,6 +370,18 @@ class GiftOrderTests(APITestCase):
         data = response.data["data"]
         self.assertFalse(data["is_gift"])
         self.assertEqual(data["gift_message"], "")
+
+    def test_cannot_edit_order_via_generic_patch(self):
+        """Order mutation must go through cancel/status, not a direct PATCH - see OrderViewSet.partial_update."""
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        order_id = order_response.data["data"]["id"]
+
+        response = self.client.patch(reverse("order-detail", args=[order_id]), {"notes": "hacked"})
+        self.assertEqual(response.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+
+        order_response = self.client.get(reverse("order-detail", args=[order_id]))
+        self.assertEqual(order_response.data["data"]["notes"], "")
 
 
 class OrderStatusHistoryTests(APITestCase):

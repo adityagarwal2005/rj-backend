@@ -31,15 +31,21 @@ def get_or_create_cart(user) -> Cart:
 
 def add_item_to_cart(user, product, quantity: int) -> CartItem:
     cart = get_or_create_cart(user)
-    item, created = CartItem.objects.get_or_create(cart=cart, product=product, defaults={"quantity": quantity})
-    if not created:
-        item.quantity += quantity
-        item.save(update_fields=["quantity"])
-    return item
+    existing = CartItem.objects.filter(cart=cart, product=product).first()
+    new_quantity = quantity + (existing.quantity if existing else 0)
+    if new_quantity > product.stock_quantity:
+        raise ValidationError(f"Only {product.stock_quantity} unit(s) of '{product.name}' left in stock.")
+    if existing:
+        existing.quantity = new_quantity
+        existing.save(update_fields=["quantity"])
+        return existing
+    return CartItem.objects.create(cart=cart, product=product, quantity=quantity)
 
 
 def update_cart_item_quantity(user, item_id: int, quantity: int) -> CartItem:
-    item = CartItem.objects.select_related("cart").get(id=item_id, cart__user=user)
+    item = CartItem.objects.select_related("cart", "product").get(id=item_id, cart__user=user)
+    if quantity > item.product.stock_quantity:
+        raise ValidationError(f"Only {item.product.stock_quantity} unit(s) of '{item.product.name}' left in stock.")
     item.quantity = quantity
     item.save(update_fields=["quantity"])
     return item
@@ -78,6 +84,17 @@ def create_order_from_cart(
     until a staff member fills in the address given in chat - see
     apps.orders.views.OrderViewSet.checkout_whatsapp.
     """
+    from apps.users.models import User
+
+    # Lock the user row for this transaction: without it, two concurrent
+    # checkouts for the same user (double-tap "Place order", two open tabs)
+    # can both read "no prior orders yet" / the same unused referral credit
+    # below and both apply a one-time discount that should only ever be
+    # granted once - see apps.orders.referrals.is_first_order_for and
+    # available_credit_for. decrease_stock() already does the equivalent for
+    # product rows; this closes the same gap for user-scoped state.
+    user = User.objects.select_for_update().get(pk=user.pk)
+
     cart = get_or_create_cart(user)
     cart_items = list(cart.items.select_related("product"))
 
@@ -87,7 +104,7 @@ def create_order_from_cart(
     # Must be computed before the Order row below exists, or "is this their
     # first order" would immediately see the order we're about to create.
     is_first_order = referrals.is_first_order_for(user)
-    referral_credit = referrals.available_credit_for(user)
+    referral_credit = referrals.available_credit_for(user, for_update=True)
 
     order = Order.objects.create(
         user=user,
