@@ -1,0 +1,116 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Dashboard</div>
+{% endblock %}
+
+{% block content %}
+<style>
+  .rt-cards { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 28px; }
+  .rt-card {
+    background: var(--body-bg, #fff); border: 1px solid var(--border-color, #ccc);
+    border-radius: 8px; padding: 16px 20px; min-width: 180px; flex: 1 1 180px;
+  }
+  .rt-card .rt-label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .65; }
+  .rt-card .rt-value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+  .rt-card.rt-alert { border-color: #d97706; }
+  .rt-card.rt-alert .rt-value { color: #d97706; }
+  .rt-section { margin-bottom: 32px; }
+  .rt-section h2 { font-size: 16px; margin-bottom: 8px; }
+  table.rt-table { width: 100%; border-collapse: collapse; }
+  table.rt-table th, table.rt-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-color, #eee); font-size: 13px; }
+  .rt-empty { opacity: .6; font-style: italic; padding: 8px 0; }
+</style>
+
+<div class="rt-cards">
+  <div class="rt-card {% if pending_orders_count %}rt-alert{% endif %}">
+    <div class="rt-label">Pending orders</div>
+    <div class="rt-value">{{ pending_orders_count }}</div>
+  </div>
+  <div class="rt-card {% if whatsapp_orders_count %}rt-alert{% endif %}">
+    <div class="rt-label">WhatsApp orders awaiting details</div>
+    <div class="rt-value">{{ whatsapp_orders_count }}</div>
+  </div>
+  <div class="rt-card">
+    <div class="rt-label">Revenue today (confirmed)</div>
+    <div class="rt-value">&#8377;{{ revenue_today }}</div>
+  </div>
+  <div class="rt-card">
+    <div class="rt-label">Orders today</div>
+    <div class="rt-value">{{ orders_today_count }}</div>
+  </div>
+  <div class="rt-card">
+    <div class="rt-label">Visitors today / 7d</div>
+    <div class="rt-value">{{ visitors_today }} / {{ visitors_week }}</div>
+  </div>
+  <div class="rt-card">
+    <div class="rt-label">Pageviews today / 7d</div>
+    <div class="rt-value">{{ pageviews_today }} / {{ pageviews_week }}</div>
+  </div>
+</div>
+
+<div class="rt-section">
+  <h2>WhatsApp orders awaiting an address ({{ whatsapp_orders_count }})</h2>
+  {% if whatsapp_orders %}
+  <table class="rt-table">
+    <tr><th>Order</th><th>Customer</th><th>Total</th><th>Placed</th><th></th></tr>
+    {% for order in whatsapp_orders %}
+    <tr>
+      <td>{{ order.id }}</td>
+      <td>{{ order.user.email }}</td>
+      <td>&#8377;{{ order.total_amount }}</td>
+      <td>{{ order.created_at|date:"d M, H:i" }}</td>
+      <td><a href="{% url 'admin:orders_order_change' order.id %}">Open &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="rt-empty">None right now.</div>
+  {% endif %}
+</div>
+
+<div class="rt-section">
+  <h2>Pending orders ({{ pending_orders_count }})</h2>
+  {% if pending_orders %}
+  <table class="rt-table">
+    <tr><th>Order</th><th>Customer</th><th>Total</th><th>Placed</th><th></th></tr>
+    {% for order in pending_orders %}
+    <tr>
+      <td>{{ order.id }}</td>
+      <td>{{ order.user.email }}</td>
+      <td>&#8377;{{ order.total_amount }}</td>
+      <td>{{ order.created_at|date:"d M, H:i" }}</td>
+      <td><a href="{% url 'admin:orders_order_change' order.id %}">Open &rarr;</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="rt-empty">None right now.</div>
+  {% endif %}
+</div>
+
+<div class="rt-section">
+  <h2>Top pages, last 7 days</h2>
+  {% if top_paths %}
+  <table class="rt-table">
+    <tr><th>Path</th><th>Views</th></tr>
+    {% for row in top_paths %}
+    <tr><td>{{ row.path }}</td><td>{{ row.views }}</td></tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <div class="rt-empty">No traffic recorded yet.</div>
+  {% endif %}
+</div>
+
+<p>
+  <a href="{% url 'admin:orders_order_changelist' %}?status__exact=pending">All pending orders &rarr;</a>
+  &nbsp;&middot;&nbsp;
+  <a href="{% url 'admin:orders_order_changelist' %}?status__exact=awaiting_details">All WhatsApp orders &rarr;</a>
+  &nbsp;&middot;&nbsp;
+  <a href="{% url 'admin:payments_payment_changelist' %}">Payments &rarr;</a>
+  &nbsp;&middot;&nbsp;
+  <a href="{% url 'admin:analytics_pageview_changelist' %}">Raw pageviews &rarr;</a>
+</p>
+{% endblock %}

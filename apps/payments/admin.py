@@ -9,3 +9,6 @@ class PaymentAdmin(admin.ModelAdmin):
     list_editable = ["status"]
     list_filter = ["gateway", "status"]
     search_fields = ["id", "order__id", "utr_reference"]
+    # Lets staff find the right order by id/email instead of scrolling a
+    # dropdown of every order ever placed - see OrderAdmin.search_fields.
+    autocomplete_fields = ["order"]

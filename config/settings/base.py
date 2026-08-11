@@ -49,6 +49,7 @@ LOCAL_APPS = [
     "apps.orders",
     "apps.payments",
     "apps.notifications",
+    "apps.analytics",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -72,7 +73,11 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        # Project-level templates take priority over app templates - this is
+        # what lets templates/admin/base_site.html below override Django's
+        # own admin chrome (to add the Dashboard link) without fighting
+        # INSTALLED_APPS ordering.
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -142,6 +147,7 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_THROTTLE_RATES": {
         "auth": "20/min",
+        "pageview": "60/min",
     },
 }
 

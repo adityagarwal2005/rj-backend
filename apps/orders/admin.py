@@ -1,6 +1,7 @@
 from django.contrib import admin
 
-from apps.orders.models import Address, Cart, CartItem, Order, OrderItem, OrderStatusHistory
+from apps.orders.models import Address, Cart, CartItem, Order, OrderItem, OrderStatus, OrderStatusHistory
+from apps.orders.services import record_status_change
 
 
 class OrderItemInline(admin.TabularInline):
@@ -16,15 +17,43 @@ class OrderStatusHistoryInline(admin.TabularInline):
     can_delete = False
 
 
+def _make_mark_action(status: str, label: str):
+    """Bulk admin action: set every selected order to `status` and log the transition."""
+
+    def action(modeladmin, request, queryset):
+        updated = 0
+        for order in queryset.exclude(status=status):
+            order.status = status
+            order.save(update_fields=["status", "updated_at"])
+            record_status_change(order)
+            updated += 1
+        modeladmin.message_user(request, f"{updated} order(s) marked {label}.")
+
+    action.__name__ = f"mark_{status}"
+    action.short_description = f"Mark selected orders as {label}"
+    return action
+
+
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = [
-        "id", "user", "status", "total_amount", "referral_discount_amount",
+        "id", "user", "status", "whatsapp_order", "total_amount", "referral_discount_amount",
         "is_gift", "abandoned_reminder_sent_at", "created_at",
     ]
     list_filter = ["status", "is_gift"]
     search_fields = ["id", "user__email"]
     inlines = [OrderItemInline, OrderStatusHistoryInline]
+    actions = [
+        _make_mark_action(OrderStatus.CONFIRMED, "Confirmed (payment received)"),
+        _make_mark_action(OrderStatus.PROCESSING, "Processing"),
+        _make_mark_action(OrderStatus.SHIPPED, "Shipped"),
+        _make_mark_action(OrderStatus.DELIVERED, "Delivered"),
+        _make_mark_action(OrderStatus.CANCELLED, "Cancelled"),
+    ]
+
+    @admin.display(description="WhatsApp?", boolean=True)
+    def whatsapp_order(self, obj):
+        return obj.status == OrderStatus.AWAITING_DETAILS or obj.address_id is None
 
 
 @admin.register(Address)
