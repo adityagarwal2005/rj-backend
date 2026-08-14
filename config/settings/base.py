@@ -21,6 +21,13 @@ SECRET_KEY = env("SECRET_KEY", default="unsafe-dev-key-change-me")
 DEBUG = env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=[])
 
+# Read by the bootstrap_admin management command (apps/users/management/
+# commands/bootstrap_admin.py), run from the Render build step - lets us
+# create/reset the one admin login without shell access on the free tier.
+# Unset (the default) -> the command is a no-op.
+ADMIN_EMAIL = env("ADMIN_EMAIL", default="")
+ADMIN_PASSWORD = env("ADMIN_PASSWORD", default="")
+
 # --- Applications ---
 # Django apps + third-party apps + our own apps are separated so it's obvious
 # at a glance which ones belong to this project (apps.*).

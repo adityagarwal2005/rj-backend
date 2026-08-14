@@ -3,7 +3,7 @@ services:
     name: rajwaditukda-backend
     runtime: python
     plan: free
-    buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate"
+    buildCommand: "pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate && python manage.py bootstrap_admin"
     startCommand: "gunicorn config.wsgi:application"
     envVars:
       - key: DJANGO_SETTINGS_MODULE
@@ -57,6 +57,13 @@ services:
         sync: false
       - key: CRON_SECRET
         generateValue: true
+      # Read once by bootstrap_admin on each build to create/reset the one
+      # admin login (no shell access on the free Render plan). Safe to
+      # leave blank/unset - the command no-ops without both of these.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: ACCESS_TOKEN_LIFETIME_MINUTES
         value: "60"
       - key: REFRESH_TOKEN_LIFETIME_DAYS
