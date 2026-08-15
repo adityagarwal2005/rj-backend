@@ -50,10 +50,6 @@ class UpdateCartItemSerializer(serializers.Serializer):
     quantity = serializers.IntegerField(min_value=1)
 
 
-class ApplyPromoCodeSerializer(serializers.Serializer):
-    code = serializers.CharField(max_length=20)
-
-
 class CartSerializer(serializers.ModelSerializer):
     items = CartItemSerializer(many=True, read_only=True)
     subtotal_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
@@ -66,9 +62,8 @@ class CartSerializer(serializers.ModelSerializer):
         model = Cart
         fields = [
             "id", "items", "subtotal_amount", "discount_percentage", "discount_amount",
-            "applied_promo_code", "referral_discount_amount", "total_amount",
+            "referral_discount_amount", "total_amount",
         ]
-        read_only_fields = ["applied_promo_code"]
 
     def get_referral_discount_amount(self, obj):
         return referrals.total_referral_discount_for(obj.user)

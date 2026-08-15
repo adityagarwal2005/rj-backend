@@ -16,7 +16,6 @@ from apps.orders.permissions import IsOrderOwnerOrAdmin
 from apps.orders.serializers import (
     AddCartItemSerializer,
     AddressSerializer,
-    ApplyPromoCodeSerializer,
     CartSerializer,
     CreateOrderSerializer,
     CreateWhatsAppOrderSerializer,
@@ -72,25 +71,6 @@ class CartView(APIView):
     def get(self, request):
         cart = services.get_or_create_cart(request.user)
         return api_success(CartSerializer(cart).data)
-
-
-class CartPromoView(APIView):
-    """POST/DELETE /api/orders/cart/promo/ - apply or remove a promo code on the cart."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        serializer = ApplyPromoCodeSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        try:
-            cart = services.apply_promo_code(request.user, serializer.validated_data["code"])
-        except DjangoValidationError as exc:
-            return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
-        return api_success(CartSerializer(cart).data, message="Promo code applied!")
-
-    def delete(self, request):
-        cart = services.remove_promo_code(request.user)
-        return api_success(CartSerializer(cart).data, message="Promo code removed.")
 
 
 class CartItemListView(APIView):

@@ -10,7 +10,7 @@ from django.utils import timezone
 from apps.notifications import services as notification_services
 from apps.orders import referrals
 from apps.orders.models import Cart, CartItem, Order, OrderItem, OrderStatus, OrderStatusHistory
-from apps.orders.pricing import discount_for_code, is_known_code
+from apps.orders.pricing import bulk_discount_for_subtotal
 from apps.products import services as product_services
 
 # How long an unpaid order sits before we nudge the customer, and before we
@@ -53,25 +53,6 @@ def update_cart_item_quantity(user, item_id: int, quantity: int) -> CartItem:
 
 def remove_cart_item(user, item_id: int) -> None:
     CartItem.objects.filter(id=item_id, cart__user=user).delete()
-
-
-def apply_promo_code(user, code: str) -> Cart:
-    cart = get_or_create_cart(user)
-    if not is_known_code(code):
-        raise ValidationError("That code doesn't look right.")
-    percentage, _ = discount_for_code(code, cart.subtotal_amount)
-    if percentage == 0:
-        raise ValidationError("Your order doesn't qualify for this code yet.")
-    cart.applied_promo_code = code.strip().upper()
-    cart.save(update_fields=["applied_promo_code"])
-    return cart
-
-
-def remove_promo_code(user) -> Cart:
-    cart = get_or_create_cart(user)
-    cart.applied_promo_code = ""
-    cart.save(update_fields=["applied_promo_code"])
-    return cart
 
 
 @transaction.atomic
@@ -132,7 +113,7 @@ def create_order_from_cart(
         )
         subtotal_amount += product.effective_price * cart_item.quantity
 
-    discount_percentage, discount_amount = discount_for_code(cart.applied_promo_code, subtotal_amount)
+    discount_percentage, discount_amount = bulk_discount_for_subtotal(subtotal_amount)
 
     referral_discount_amount = referrals.referee_discount_for(user, is_first_order)
     if referral_credit is not None:
@@ -145,11 +126,11 @@ def create_order_from_cart(
     order.discount_percentage = discount_percentage
     order.discount_amount = discount_amount
     order.referral_discount_amount = referral_discount_amount
-    # Clamp rather than trust the arithmetic: a stacked promo code + referral
-    # discount + referral credit could otherwise drive this negative if any
-    # of those thresholds change in the future (total_amount has no
-    # server-side floor beyond this - see the model's MinValueValidator,
-    # which full_clean() never runs here to check).
+    # Clamp rather than trust the arithmetic: a stacked bulk discount +
+    # referral discount + referral credit could otherwise drive this
+    # negative if any of those thresholds change in the future
+    # (total_amount has no server-side floor beyond this - see the model's
+    # MinValueValidator, which full_clean() never runs here to check).
     order.total_amount = max(Decimal("0"), subtotal_amount - discount_amount - referral_discount_amount)
     # This business is prepaid-only for now, so an order set to PENDING isn't
     # confirmed until payment is manually verified (see apps.payments.signals,
@@ -160,9 +141,6 @@ def create_order_from_cart(
 
     cart_items_ids = [item.id for item in cart_items]
     CartItem.objects.filter(id__in=cart_items_ids).delete()
-    if cart.applied_promo_code:
-        cart.applied_promo_code = ""
-        cart.save(update_fields=["applied_promo_code"])
 
     notification_services.notify_order_status_change(order)
     return order

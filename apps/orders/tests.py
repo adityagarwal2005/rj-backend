@@ -70,8 +70,8 @@ class CartAndCheckoutTests(APITestCase):
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         self.assertEqual(response.data["data"]["status"], "pending")
 
-    def test_no_discount_without_applying_a_code(self):
-        """price=300, qty=2 -> subtotal=600, but no promo code applied -> no discount."""
+    def test_no_discount_below_bulk_threshold(self):
+        """price=300, qty=2 -> subtotal=600, below the 800 bulk-discount threshold -> no discount."""
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         data = response.data["data"]
@@ -79,25 +79,15 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(data["discount_amount"], "0.00")
         self.assertEqual(data["total_amount"], "600.00")
 
-    def test_checkout_applies_discount_from_code_on_cart(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
-        self.client.post(reverse("cart-promo"), {"code": "SAVE20"})
+    def test_checkout_applies_automatic_bulk_discount(self):
+        """price=300, qty=3 -> subtotal=900, crosses the 800 threshold -> automatic 15% off, no code needed."""
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 3})
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         data = response.data["data"]
-        self.assertEqual(data["subtotal_amount"], "600.00")
-        self.assertEqual(data["discount_percentage"], "20.00")
-        self.assertEqual(data["discount_amount"], "120.00")
-        self.assertEqual(data["total_amount"], "480.00")
-
-    def test_no_discount_below_lowest_tier(self):
-        cheap_product = Product.objects.create(
-            category=self.product.category, name="Mini Bite", price=150, stock_quantity=5
-        )
-        self.client.post(reverse("cart-item-list"), {"product_id": cheap_product.id, "quantity": 1})
-        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
-        data = response.data["data"]
-        self.assertEqual(data["discount_amount"], "0.00")
-        self.assertEqual(data["total_amount"], "150.00")
+        self.assertEqual(data["subtotal_amount"], "900.00")
+        self.assertEqual(data["discount_percentage"], "15.00")
+        self.assertEqual(data["discount_amount"], "135.00")
+        self.assertEqual(data["total_amount"], "765.00")
 
     def test_address_outside_jaipur_is_rejected(self):
         response = self.client.post(reverse("address-list"), {
@@ -150,61 +140,50 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
-class PromoCodeTests(APITestCase):
+class BulkDiscountTests(APITestCase):
+    """The 15%-off-orders-over-800 discount is automatic - no code to apply/remove."""
+
     def setUp(self):
         self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
         self.client.force_authenticate(user=self.user)
         category = Category.objects.create(name="Chocolates")
         self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=200, stock_quantity=10)
 
-    def test_apply_code_customer_qualifies_for(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
-        response = self.client.post(reverse("cart-promo"), {"code": "save10"})
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+    def test_no_discount_below_threshold(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 3})
+        response = self.client.get(reverse("cart-detail"))
         data = response.data["data"]
-        self.assertEqual(data["applied_promo_code"], "SAVE10")
-        self.assertEqual(data["discount_percentage"], "10.00")
-        self.assertEqual(data["total_amount"], Decimal("180.00"))
-
-    def test_apply_code_customer_does_not_yet_qualify_for(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
-        response = self.client.post(reverse("cart-promo"), {"code": "SAVE20"})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_apply_unknown_code(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
-        response = self.client.post(reverse("cart-promo"), {"code": "NOTREAL"})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-
-    def test_remove_applied_code(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
-        self.client.post(reverse("cart-promo"), {"code": "SAVE10"})
-        response = self.client.delete(reverse("cart-promo"))
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["data"]["applied_promo_code"], "")
-        self.assertEqual(response.data["data"]["discount_amount"], "0.00")
-
-    def test_applied_code_stops_discounting_if_cart_drops_below_threshold(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
-        self.client.post(reverse("cart-promo"), {"code": "SAVE20"})
-        cart_response = self.client.get(reverse("cart-detail"))
-        item_id = cart_response.data["data"]["items"][0]["id"]
-        response = self.client.patch(reverse("cart-item-detail", args=[item_id]), {"quantity": 1})
-        data = response.data["data"]
-        self.assertEqual(data["applied_promo_code"], "SAVE20")
+        self.assertEqual(data["subtotal_amount"], "600.00")
         self.assertEqual(data["discount_amount"], "0.00")
 
-    def test_checkout_requires_reapplying_code_after_order_placed(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
-        self.client.post(reverse("cart-promo"), {"code": "SAVE10"})
+    def test_discount_applies_automatically_once_threshold_crossed(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 4})
+        response = self.client.get(reverse("cart-detail"))
+        data = response.data["data"]
+        self.assertEqual(data["subtotal_amount"], "800.00")
+        self.assertEqual(data["discount_percentage"], "15.00")
+        self.assertEqual(data["discount_amount"], "120.00")
+        self.assertEqual(data["total_amount"], Decimal("680.00"))
+
+    def test_discount_disappears_if_cart_drops_below_threshold(self):
+        add_response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 4})
+        item_id = add_response.data["data"]["items"][0]["id"]
+        response = self.client.patch(reverse("cart-item-detail", args=[item_id]), {"quantity": 2})
+        data = response.data["data"]
+        self.assertEqual(data["discount_amount"], "0.00")
+
+    def test_checkout_freezes_the_automatic_discount_on_the_order(self):
         address = Address.objects.create(
             user=self.user, full_name="Cust", phone="9999999999",
             line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
         )
-        self.client.post(reverse("order-list"), {"address_id": address.id})
-
-        cart_response = self.client.get(reverse("cart-detail"))
-        self.assertEqual(cart_response.data["data"]["applied_promo_code"], "")
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 5})
+        response = self.client.post(reverse("order-list"), {"address_id": address.id})
+        data = response.data["data"]
+        self.assertEqual(data["subtotal_amount"], "1000.00")
+        self.assertEqual(data["discount_percentage"], "15.00")
+        self.assertEqual(data["discount_amount"], "150.00")
+        self.assertEqual(data["total_amount"], "850.00")
 
 
 class ReferralProgramTests(APITestCase):
