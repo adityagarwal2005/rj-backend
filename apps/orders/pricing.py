@@ -12,7 +12,7 @@ threshold, nothing for a customer to type or a staff member to hand out.
 from decimal import ROUND_HALF_UP, Decimal
 
 BULK_DISCOUNT_THRESHOLD = Decimal("800")
-BULK_DISCOUNT_PERCENTAGE = Decimal("15")
+BULK_DISCOUNT_PERCENTAGE = Decimal("5")
 
 
 def bulk_discount_for_subtotal(subtotal: Decimal) -> tuple[Decimal, Decimal]:

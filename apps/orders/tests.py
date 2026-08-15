@@ -80,14 +80,14 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(data["total_amount"], "600.00")
 
     def test_checkout_applies_automatic_bulk_discount(self):
-        """price=300, qty=3 -> subtotal=900, crosses the 800 threshold -> automatic 15% off, no code needed."""
+        """price=300, qty=3 -> subtotal=900, crosses the 800 threshold -> automatic 5% off, no code needed."""
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 3})
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         data = response.data["data"]
         self.assertEqual(data["subtotal_amount"], "900.00")
-        self.assertEqual(data["discount_percentage"], "15.00")
-        self.assertEqual(data["discount_amount"], "135.00")
-        self.assertEqual(data["total_amount"], "765.00")
+        self.assertEqual(data["discount_percentage"], "5.00")
+        self.assertEqual(data["discount_amount"], "45.00")
+        self.assertEqual(data["total_amount"], "855.00")
 
     def test_address_outside_jaipur_is_rejected(self):
         response = self.client.post(reverse("address-list"), {
@@ -141,7 +141,7 @@ class CartAndCheckoutTests(APITestCase):
 
 
 class BulkDiscountTests(APITestCase):
-    """The 15%-off-orders-over-800 discount is automatic - no code to apply/remove."""
+    """The 5%-off-orders-over-800 discount is automatic - no code to apply/remove."""
 
     def setUp(self):
         self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
@@ -161,9 +161,9 @@ class BulkDiscountTests(APITestCase):
         response = self.client.get(reverse("cart-detail"))
         data = response.data["data"]
         self.assertEqual(data["subtotal_amount"], "800.00")
-        self.assertEqual(data["discount_percentage"], "15.00")
-        self.assertEqual(data["discount_amount"], "120.00")
-        self.assertEqual(data["total_amount"], Decimal("680.00"))
+        self.assertEqual(data["discount_percentage"], "5.00")
+        self.assertEqual(data["discount_amount"], "40.00")
+        self.assertEqual(data["total_amount"], Decimal("760.00"))
 
     def test_discount_disappears_if_cart_drops_below_threshold(self):
         add_response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 4})
@@ -181,9 +181,9 @@ class BulkDiscountTests(APITestCase):
         response = self.client.post(reverse("order-list"), {"address_id": address.id})
         data = response.data["data"]
         self.assertEqual(data["subtotal_amount"], "1000.00")
-        self.assertEqual(data["discount_percentage"], "15.00")
-        self.assertEqual(data["discount_amount"], "150.00")
-        self.assertEqual(data["total_amount"], "850.00")
+        self.assertEqual(data["discount_percentage"], "5.00")
+        self.assertEqual(data["discount_amount"], "50.00")
+        self.assertEqual(data["total_amount"], "950.00")
 
 
 class ReferralProgramTests(APITestCase):
