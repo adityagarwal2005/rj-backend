@@ -6,12 +6,20 @@ a provider (Razorpay, Stripe, etc.) later means writing one new class here
 and registering it in GATEWAYS, with no changes to views/models/orders.
 """
 
+from decimal import Decimal
+
 import razorpay
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from apps.payments.models import Payment, PaymentGatewayChoice, PaymentStatus
+
+# Flat surcharge added on top of the order total when a customer chooses
+# Cash on Delivery instead of paying online - covers the extra handling
+# cost of collecting cash at the door. Online payment (manual/Razorpay)
+# never carries this fee.
+COD_FEE = Decimal("15")
 
 
 class PaymentGateway:
@@ -73,15 +81,25 @@ class ManualGateway(PaymentGateway):
 
 
 class CODGateway(PaymentGateway):
-    """Not currently offered (business is prepaid-only for now) - kept for when COD returns."""
+    """
+    Cash collected at the door, so - like manual UPI transfers - there's no
+    automated callback to trust: a staff member marks the Payment 'success'
+    in the admin once the cash is actually in hand (typically at/after
+    delivery), same as apps.payments.signals expects for any gateway.
+    """
 
     code = PaymentGatewayChoice.COD
 
     def create_payment_intent(self, payment: Payment) -> dict:
-        return {"gateway": self.code, "message": "Pay in cash when your order is delivered."}
+        return {
+            "gateway": self.code,
+            "amount": str(payment.amount),
+            "cod_fee": str(COD_FEE),
+            "message": "Pay in cash when your order is delivered.",
+        }
 
     def verify_payment(self, payment: Payment, callback_payload: dict) -> bool:
-        return True
+        raise NotImplementedError("COD payments are confirmed via the admin once cash is collected, not this endpoint.")
 
 
 def get_razorpay_client() -> razorpay.Client:
@@ -141,13 +159,8 @@ def _active_gateways() -> dict:
     turning Razorpay on/off is purely a matter of the env vars being set -
     no restart-sensitive import-time caching, and tests can toggle it with
     override_settings.
-
-    COD is intentionally left out: the business is prepaid-only right now,
-    so only "manual" (and "razorpay", once configured) can be initiated via
-    the API, even though the COD gateway class (and DB choice, for
-    historical orders) still exists.
     """
-    gateways = {PaymentGatewayChoice.MANUAL: ManualGateway()}
+    gateways = {PaymentGatewayChoice.MANUAL: ManualGateway(), PaymentGatewayChoice.COD: CODGateway()}
     if settings.RAZORPAY_KEY_ID and settings.RAZORPAY_KEY_SECRET:
         gateways[PaymentGatewayChoice.RAZORPAY] = RazorpayGateway()
     return gateways
@@ -190,7 +203,8 @@ def get_gateway(code: str) -> PaymentGateway:
 @transaction.atomic
 def initiate_payment(order, gateway_code: str) -> tuple[Payment, dict]:
     gateway = get_gateway(gateway_code)
-    payment = Payment.objects.create(order=order, gateway=gateway_code, amount=order.total_amount)
+    amount = order.total_amount + COD_FEE if gateway_code == PaymentGatewayChoice.COD else order.total_amount
+    payment = Payment.objects.create(order=order, gateway=gateway_code, amount=amount)
     intent_data = gateway.create_payment_intent(payment)
     return payment, intent_data
 

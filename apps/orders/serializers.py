@@ -94,22 +94,40 @@ class OrderSerializer(serializers.ModelSerializer):
     address = AddressSerializer(read_only=True, allow_null=True)
     status_history = OrderStatusHistorySerializer(many=True, read_only=True)
     reviewed_product_ids = serializers.SerializerMethodField()
+    payment_gateway = serializers.SerializerMethodField()
+    payment_amount_due = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
         fields = [
             "id", "status", "subtotal_amount", "discount_percentage", "discount_amount",
             "referral_discount_amount", "total_amount", "notes", "is_gift", "gift_message",
-            "address", "items", "status_history", "reviewed_product_ids", "created_at",
+            "address", "items", "status_history", "reviewed_product_ids",
+            "payment_gateway", "payment_amount_due", "created_at",
         ]
         read_only_fields = [
             "id", "status", "subtotal_amount", "discount_percentage", "discount_amount",
             "referral_discount_amount", "total_amount", "items", "status_history",
-            "reviewed_product_ids", "created_at",
+            "reviewed_product_ids", "payment_gateway", "payment_amount_due", "created_at",
         ]
 
     def get_reviewed_product_ids(self, obj):
         return list(obj.reviews.values_list("product_id", flat=True))
+
+    def _latest_payment(self, obj):
+        # Cached per-instance since both method fields below need it and
+        # DRF calls each SerializerMethodField separately.
+        if not hasattr(obj, "_latest_payment_cache"):
+            obj._latest_payment_cache = obj.payments.order_by("-created_at").first()
+        return obj._latest_payment_cache
+
+    def get_payment_gateway(self, obj):
+        payment = self._latest_payment(obj)
+        return payment.gateway if payment else None
+
+    def get_payment_amount_due(self, obj):
+        payment = self._latest_payment(obj)
+        return str(payment.amount) if payment else None
 
 
 class CreateOrderSerializer(serializers.Serializer):

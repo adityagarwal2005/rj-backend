@@ -33,9 +33,19 @@ class PaymentTests(APITestCase):
         self.assertEqual(response.data["data"]["payment"]["status"], "pending")
         self.assertIn("upi_id", response.data["data"]["gateway_data"])
 
-    def test_cod_is_no_longer_accepted(self):
+    def test_initiate_cod_payment_adds_flat_fee(self):
+        """order total=300 -> COD adds a flat 15 handling fee -> payment.amount=315."""
         response = self.client.post(reverse("payment-initiate"), {"order_id": self.order.id, "gateway": "cod"})
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["data"]["payment"]["amount"], "315.00")
+        self.assertEqual(response.data["data"]["gateway_data"]["cod_fee"], "15")
+
+    def test_cod_payment_is_not_confirmable_via_webhook(self):
+        """Like manual transfers, COD cash-in-hand can only be confirmed by staff in the admin."""
+        self.client.post(reverse("payment-initiate"), {"order_id": self.order.id, "gateway": "cod"})
+        payment = Payment.objects.get(order=self.order, gateway="cod")
+        response = self.client.post(reverse("payment-webhook", args=[payment.id]), {})
+        self.assertEqual(response.status_code, status.HTTP_501_NOT_IMPLEMENTED)
 
     @override_settings(RAZORPAY_KEY_ID="", RAZORPAY_KEY_SECRET="")
     def test_initiate_razorpay_rejected_when_not_configured(self):
