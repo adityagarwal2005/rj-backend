@@ -2,6 +2,15 @@ from .base import *  # noqa: F401,F403
 
 DEBUG = False
 
+# Cloud Run (and most reverse proxies) terminate TLS at the load balancer,
+# then forward to gunicorn over plain HTTP - so without this, Django can
+# never see a request as "already HTTPS" and SECURE_SSL_REDIRECT below
+# redirects every single request to HTTPS forever, even ones already on
+# HTTPS (an infinite redirect loop). This header is one Cloud Run's proxy
+# always sets itself and strips from any client-supplied value first, so
+# it can't be spoofed by an external request.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
