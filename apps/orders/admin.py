@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from apps.orders.models import Address, Cart, CartItem, Order, OrderItem, OrderStatus, OrderStatusHistory
 from apps.orders.services import record_status_change
+from apps.payments.models import PaymentGatewayChoice
 
 
 class OrderItemInline(admin.TabularInline):
@@ -15,6 +16,21 @@ class OrderStatusHistoryInline(admin.TabularInline):
     extra = 0
     readonly_fields = ["status", "created_at"]
     can_delete = False
+
+
+class PaymentMethodFilter(admin.SimpleListFilter):
+    """Lets staff filter the order list to just UPI/manual, COD, or Razorpay orders."""
+
+    title = "payment method"
+    parameter_name = "payment_method"
+
+    def lookups(self, request, model_admin):
+        return PaymentGatewayChoice.choices
+
+    def queryset(self, request, queryset):
+        if not self.value():
+            return queryset
+        return queryset.filter(payments__gateway=self.value()).distinct()
 
 
 def _make_mark_action(status: str, label: str):
@@ -37,10 +53,10 @@ def _make_mark_action(status: str, label: str):
 @admin.register(Order)
 class OrderAdmin(admin.ModelAdmin):
     list_display = [
-        "id", "user", "status", "whatsapp_order", "total_amount", "referral_discount_amount",
+        "id", "user", "status", "payment_method", "whatsapp_order", "total_amount", "referral_discount_amount",
         "is_gift", "abandoned_reminder_sent_at", "created_at",
     ]
-    list_filter = ["status", "is_gift"]
+    list_filter = ["status", PaymentMethodFilter, "is_gift"]
     search_fields = ["id", "user__email"]
     inlines = [OrderItemInline, OrderStatusHistoryInline]
     actions = [
@@ -54,6 +70,17 @@ class OrderAdmin(admin.ModelAdmin):
     @admin.display(description="WhatsApp?", boolean=True)
     def whatsapp_order(self, obj):
         return obj.status == OrderStatus.AWAITING_DETAILS or obj.address_id is None
+
+    @admin.display(description="Payment method")
+    def payment_method(self, obj):
+        payment = obj.payments.order_by("-created_at").first()
+        if payment is None:
+            return "—"
+        return f"{payment.get_gateway_display()} ({payment.get_status_display()})"
+
+    def get_queryset(self, request):
+        # Avoids one extra query per row for the payment_method column above.
+        return super().get_queryset(request).prefetch_related("payments")
 
 
 @admin.register(Address)
