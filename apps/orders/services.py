@@ -144,6 +144,7 @@ def create_order_from_cart(
     CartItem.objects.filter(id__in=cart_items_ids).delete()
 
     notification_services.notify_order_status_change(order)
+    notification_services.notify_admin_new_order(order)
     return order
 
 

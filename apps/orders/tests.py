@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -138,6 +139,45 @@ class CartAndCheckoutTests(APITestCase):
     def test_whatsapp_checkout_fails_with_empty_cart(self):
         response = self.client.post(reverse("order-checkout-whatsapp"))
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class AdminNewOrderAlertTests(APITestCase):
+    """The one notification that reaches the store owner, not the customer - see notify_admin_new_order."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=120, stock_quantity=10)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+
+    @override_settings(ADMIN_EMAIL="owner@example.com")
+    def test_website_checkout_emails_the_admin(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        admin_emails = [m for m in mail.outbox if m.to == ["owner@example.com"]]
+        self.assertEqual(len(admin_emails), 1)
+        self.assertIn("website", admin_emails[0].subject.lower())
+
+    @override_settings(ADMIN_EMAIL="owner@example.com")
+    def test_whatsapp_checkout_emails_the_admin(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("order-checkout-whatsapp"))
+        admin_emails = [m for m in mail.outbox if m.to == ["owner@example.com"]]
+        self.assertEqual(len(admin_emails), 1)
+        self.assertIn("whatsapp", admin_emails[0].subject.lower())
+
+    @override_settings(ADMIN_EMAIL="")
+    def test_no_admin_email_configured_is_a_silent_noop(self):
+        """Order creation still emails the customer (notify_order_status_change) - just never the (unset) admin."""
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(len(mail.outbox), 1)  # the customer's "order placed" email only
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
 
 
 class BulkUnitPricingTests(APITestCase):

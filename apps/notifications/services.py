@@ -36,6 +36,31 @@ def notify_order_status_change(order) -> None:
     send_email(order.user.email, title, message)
 
 
+def notify_admin_new_order(order) -> None:
+    """
+    The only place an order landing (website UPI/COD checkout, or a
+    WhatsApp order) actually reaches a human proactively - everything else
+    only notifies the customer. Silently does nothing if ADMIN_EMAIL isn't
+    set (same env var apps.users.management.commands.bootstrap_admin uses),
+    so this is a no-op in any environment that hasn't configured it.
+    """
+    if not settings.ADMIN_EMAIL:
+        return
+    is_whatsapp = order.status == "awaiting_details"
+    short_channel = "WhatsApp" if is_whatsapp else "website"
+    long_channel = "WhatsApp (address pending)" if is_whatsapp else "the website"
+    items = "\n".join(f"- {item.product_name} x {item.quantity}" for item in order.items.all())
+    title = f"New order via {short_channel} - ₹{order.total_amount}"
+    message = (
+        f"New order placed via {long_channel}.\n\n"
+        f"Customer: {order.user.full_name} ({order.user.email})\n"
+        f"Items:\n{items}\n"
+        f"Total: ₹{order.total_amount}\n\n"
+        "Open the admin dashboard to view and confirm it."
+    )
+    send_email(settings.ADMIN_EMAIL, title, message)
+
+
 def notify_abandoned_order(order) -> None:
     items = ", ".join(f"{item.product_name} x {item.quantity}" for item in order.items.all())
     title = "You left something in your cart!"
