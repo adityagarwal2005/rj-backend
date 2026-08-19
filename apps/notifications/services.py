@@ -36,6 +36,34 @@ def notify_order_status_change(order) -> None:
     send_email(order.user.email, title, message)
 
 
+def notify_order_placed(order) -> None:
+    """
+    The customer's first email, right when their order is created - a real
+    itemized receipt rather than the generic "status changed to Pending"
+    that notify_order_status_change sends for every later transition.
+    """
+    items = "\n".join(f"- {item.product_name} x {item.quantity} - ₹{item.subtotal}" for item in order.items.all())
+    is_whatsapp = order.status == "awaiting_details"
+
+    title = f"Thanks for your order, {order.user.full_name}!"
+    if is_whatsapp:
+        next_steps = "We'll follow up on WhatsApp shortly to confirm your delivery address and payment."
+    else:
+        next_steps = (
+            "We'll confirm your payment and get your chocolate ready to ship. "
+            "You can track your order anytime from your account."
+        )
+    message = (
+        f"Hi {order.user.full_name}, thank you for ordering from RajwadiTukda!\n\n"
+        f"Order ID: {order.id}\n"
+        f"Items:\n{items}\n"
+        f"Total: ₹{order.total_amount}\n\n"
+        f"{next_steps}"
+    )
+    create_notification(order.user, title, message, NotificationType.ORDER_UPDATE)
+    send_email(order.user.email, title, message)
+
+
 def notify_admin_new_order(order) -> None:
     """
     The only place an order landing (website UPI/COD checkout, or a

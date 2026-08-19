@@ -141,6 +141,39 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+class OrderPlacedCustomerEmailTests(APITestCase):
+    """The itemized "thanks for your order" receipt - see notify_order_placed."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=120, stock_quantity=10)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+
+    def test_website_order_gets_an_itemized_receipt(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
+        self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        customer_emails = [m for m in mail.outbox if m.to == [self.user.email]]
+        self.assertEqual(len(customer_emails), 1)
+        email = customer_emails[0]
+        self.assertIn("Thanks for your order", email.subject)
+        self.assertIn("Kunafa Chocolate", email.body)
+        self.assertIn("x 2", email.body)
+        self.assertIn("240", email.body)  # total
+        self.assertNotIn("WhatsApp", email.body)
+
+    def test_whatsapp_order_receipt_mentions_the_followup(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("order-checkout-whatsapp"))
+        customer_emails = [m for m in mail.outbox if m.to == [self.user.email]]
+        self.assertEqual(len(customer_emails), 1)
+        self.assertIn("WhatsApp", customer_emails[0].body)
+
+
 class AdminNewOrderAlertTests(APITestCase):
     """The one notification that reaches the store owner, not the customer - see notify_admin_new_order."""
 
@@ -172,7 +205,7 @@ class AdminNewOrderAlertTests(APITestCase):
 
     @override_settings(ADMIN_EMAIL="")
     def test_no_admin_email_configured_is_a_silent_noop(self):
-        """Order creation still emails the customer (notify_order_status_change) - just never the (unset) admin."""
+        """Order creation still emails the customer (notify_order_placed) - just never the (unset) admin."""
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)

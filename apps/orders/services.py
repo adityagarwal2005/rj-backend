@@ -143,7 +143,7 @@ def create_order_from_cart(
     cart_items_ids = [item.id for item in cart_items]
     CartItem.objects.filter(id__in=cart_items_ids).delete()
 
-    notification_services.notify_order_status_change(order)
+    notification_services.notify_order_placed(order)
     notification_services.notify_admin_new_order(order)
     return order
 
