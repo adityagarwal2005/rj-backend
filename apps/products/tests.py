@@ -54,6 +54,35 @@ class ProductTests(APITestCase):
         self.assertFalse(response.data["data"]["results"][0]["is_wishlisted"])
 
 
+class BulkPricingTests(APITestCase):
+    """price_for_quantity: buy 1 at the base price, 2+ at the bulk per-unit price."""
+
+    def setUp(self):
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(
+            category=category, name="Kunafa Chocolate", price=120, stock_quantity=10,
+            bulk_price=110, bulk_min_quantity=2,
+        )
+
+    def test_single_unit_uses_base_price(self):
+        self.assertEqual(self.product.price_for_quantity(1), 120)
+
+    def test_bulk_quantity_uses_bulk_price(self):
+        self.assertEqual(self.product.price_for_quantity(2), 110)
+        self.assertEqual(self.product.price_for_quantity(5), 110)
+
+    def test_no_bulk_price_set_always_uses_effective_price(self):
+        plain = Product.objects.create(category=self.product.category, name="Plain Bar", price=200, stock_quantity=5)
+        self.assertEqual(plain.price_for_quantity(1), 200)
+        self.assertEqual(plain.price_for_quantity(10), 200)
+
+    def test_bulk_price_ignored_below_min_quantity(self):
+        self.product.bulk_min_quantity = 3
+        self.product.save(update_fields=["bulk_min_quantity"])
+        self.assertEqual(self.product.price_for_quantity(2), 120)
+        self.assertEqual(self.product.price_for_quantity(3), 110)
+
+
 class WishlistTests(APITestCase):
     def setUp(self):
         self.category = Category.objects.create(name="Chocolates")

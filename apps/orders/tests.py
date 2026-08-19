@@ -140,6 +140,43 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+class BulkUnitPricingTests(APITestCase):
+    """Per-product quantity price break (e.g. 120 for 1, 110/unit for 2+) - distinct from the order-level bulk discount below."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(
+            category=category, name="Kunafa Chocolate", price=120, stock_quantity=10,
+            bulk_price=110, bulk_min_quantity=2,
+        )
+
+    def test_cart_reflects_base_price_for_single_unit(self):
+        response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        item = response.data["data"]["items"][0]
+        self.assertEqual(item["unit_price"], "120.00")
+        self.assertEqual(item["subtotal"], "120.00")
+
+    def test_cart_reflects_bulk_price_for_two_or_more(self):
+        response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
+        item = response.data["data"]["items"][0]
+        self.assertEqual(item["unit_price"], "110.00")
+        self.assertEqual(item["subtotal"], "220.00")
+
+    def test_checkout_snapshots_the_bulk_unit_price(self):
+        address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
+        response = self.client.post(reverse("order-list"), {"address_id": address.id})
+        data = response.data["data"]
+        self.assertEqual(data["subtotal_amount"], "220.00")
+        order_item = data["items"][0]
+        self.assertEqual(order_item["unit_price"], "110.00")
+
+
 class BulkDiscountTests(APITestCase):
     """The 5%-off-orders-over-800 discount is automatic - no code to apply/remove."""
 

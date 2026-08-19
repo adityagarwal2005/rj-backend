@@ -67,7 +67,7 @@ class CartItem(TimeStampedModel):
 
     @property
     def subtotal(self):
-        return self.product.effective_price * self.quantity
+        return self.product.price_for_quantity(self.quantity) * self.quantity
 
 
 class OrderStatus(models.TextChoices):

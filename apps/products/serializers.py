@@ -63,7 +63,7 @@ class ProductListSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers.M
         model = Product
         fields = [
             "id", "name", "slug", "category", "price", "discount_price",
-            "effective_price", "weight_label", "stock_quantity", "in_stock",
+            "effective_price", "bulk_price", "bulk_min_quantity", "weight_label", "stock_quantity", "in_stock",
             "is_featured", "primary_image", "average_rating", "review_count", "is_wishlisted",
         ]
 
@@ -89,7 +89,7 @@ class ProductDetailSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers
         model = Product
         fields = [
             "id", "name", "slug", "description", "ingredients", "category", "category_id",
-            "price", "discount_price", "effective_price", "weight_label",
+            "price", "discount_price", "effective_price", "bulk_price", "bulk_min_quantity", "weight_label",
             "stock_quantity", "in_stock", "is_active", "is_featured",
             "images", "average_rating", "review_count", "is_wishlisted", "created_at", "updated_at",
         ]

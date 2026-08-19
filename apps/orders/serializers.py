@@ -29,7 +29,10 @@ class AddressSerializer(serializers.ModelSerializer):
 
 class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
-    unit_price = serializers.DecimalField(source="product.effective_price", max_digits=8, decimal_places=2, read_only=True)
+    # Quantity-aware (not just product.effective_price) - a bulk price break
+    # means the per-unit price itself can change as quantity changes, so
+    # this has to be computed per row rather than read straight off Product.
+    unit_price = serializers.SerializerMethodField()
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     # So the cart UI can cap +/- at what's actually in stock instead of only
     # discovering a shortfall at checkout - see apps.products.services.decrease_stock.
@@ -39,6 +42,9 @@ class CartItemSerializer(serializers.ModelSerializer):
         model = CartItem
         fields = ["id", "product", "product_name", "unit_price", "quantity", "subtotal", "stock_quantity"]
         read_only_fields = ["id"]
+
+    def get_unit_price(self, obj):
+        return str(obj.product.price_for_quantity(obj.quantity))
 
 
 class AddCartItemSerializer(serializers.Serializer):

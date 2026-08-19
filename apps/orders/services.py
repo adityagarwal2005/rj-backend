@@ -103,15 +103,16 @@ def create_order_from_cart(
     for cart_item in cart_items:
         product = cart_item.product
         product_services.decrease_stock(product, cart_item.quantity)
+        unit_price = product.price_for_quantity(cart_item.quantity)
 
         OrderItem.objects.create(
             order=order,
             product=product,
             product_name=product.name,
-            unit_price=product.effective_price,
+            unit_price=unit_price,
             quantity=cart_item.quantity,
         )
-        subtotal_amount += product.effective_price * cart_item.quantity
+        subtotal_amount += unit_price * cart_item.quantity
 
     discount_percentage, discount_amount = bulk_discount_for_subtotal(subtotal_amount)
 

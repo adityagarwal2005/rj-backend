@@ -50,6 +50,18 @@ class Product(TimeStampedModel):
         max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0"))]
     )
 
+    # Per-unit price break for buying several at once (e.g. "buy 2, pay 110
+    # each instead of 120") - distinct from discount_price above, which is a
+    # flat sale price applied regardless of quantity. Both null by default;
+    # see price_for_quantity() for how they combine.
+    bulk_price = models.DecimalField(
+        max_digits=8, decimal_places=2, null=True, blank=True, validators=[MinValueValidator(Decimal("0"))],
+        help_text="Per-unit price once bulk_min_quantity is reached, e.g. 110.00.",
+    )
+    bulk_min_quantity = models.PositiveIntegerField(
+        null=True, blank=True, default=2, help_text="Quantity at which bulk_price kicks in, e.g. 2.",
+    )
+
     # Rajasthani sweets are typically sold by weight rather than by unit count.
     weight_label = models.CharField(max_length=50, help_text="e.g. 250g, 500g, 1kg", default="500g")
     stock_quantity = models.PositiveIntegerField(default=0)
@@ -75,6 +87,12 @@ class Product(TimeStampedModel):
     @property
     def effective_price(self):
         return self.discount_price if self.discount_price is not None else self.price
+
+    def price_for_quantity(self, quantity: int):
+        """Per-unit price for buying `quantity` of this product - drops to bulk_price once bulk_min_quantity is met."""
+        if self.bulk_price is not None and self.bulk_min_quantity and quantity >= self.bulk_min_quantity:
+            return self.bulk_price
+        return self.effective_price
 
     @property
     def in_stock(self):
