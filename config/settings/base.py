@@ -129,6 +129,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
 CORS_ALLOW_CREDENTIALS = True
 
+# Base URL of the React frontend, used to build links embedded in emails
+# (e.g. the password-reset link) - has a working default so this never
+# needs its own env var in the common case of frontend and backend sharing
+# the same root domain.
+FRONTEND_URL = env("FRONTEND_URL", default="https://rajwaditukda.in")
+
 # Needed for Django admin login (session/CSRF-based) once the API is served
 # from a custom domain - without this, POSTing the admin login form from
 # https://api.yourdomain.com fails Django's Origin check even though the
@@ -155,6 +161,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "auth": "20/min",
         "pageview": "60/min",
+        "otp": "5/min",
     },
 }
 

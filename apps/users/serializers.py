@@ -59,6 +59,34 @@ class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()
 
 
+class VerifyEmailSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+
+
+class ResendOtpSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class OtpLoginRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class OtpLoginVerifySerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+
+
+class PasswordResetRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.IntegerField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True, validators=[validate_password])
+
+
 class ReferralCreditSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReferralCredit

@@ -89,6 +89,32 @@ def notify_admin_new_order(order) -> None:
     send_email(settings.ADMIN_EMAIL, title, message)
 
 
+def send_otp_email(user, code: str, purpose: str) -> None:
+    if purpose == "signup":
+        title = "Verify your email - RajwadiTukda"
+        intro = "Welcome to RajwadiTukda! Use this code to verify your email and activate your account:"
+    else:
+        title = "Your login code - RajwadiTukda"
+        intro = "Use this code to log in to RajwadiTukda:"
+    message = (
+        f"Hi {user.full_name},\n\n{intro}\n\n{code}\n\n"
+        "This code expires in 10 minutes. If you didn't request this, you can safely ignore this email."
+    )
+    send_email(user.email, title, message)
+
+
+def send_password_reset_email(user, token: str) -> None:
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?uid={user.pk}&token={token}"
+    title = "Reset your RajwadiTukda password"
+    message = (
+        f"Hi {user.full_name},\n\n"
+        "Someone requested a password reset for your RajwadiTukda account. Click the link below to set a "
+        f"new password (expires in 30 minutes):\n\n{reset_url}\n\n"
+        "If you didn't request this, you can safely ignore this email - your password won't change."
+    )
+    send_email(user.email, title, message)
+
+
 def notify_abandoned_order(order) -> None:
     items = ", ".join(f"{item.product_name} x {item.quantity}" for item in order.items.all())
     title = "You left something in your cart!"

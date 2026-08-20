@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
+from django.utils import timezone
 
 from apps.core.models import TimeStampedModel
 from apps.users.managers import UserManager
@@ -88,3 +89,44 @@ class ReferralCredit(TimeStampedModel):
     def __str__(self):
         status = "used" if self.is_used else "available"
         return f"₹{self.amount} credit for {self.user.email} ({status})"
+
+
+class OTPPurpose(models.TextChoices):
+    SIGNUP = "signup", "Signup Verification"
+    LOGIN = "login", "Login"
+    PASSWORD_RESET = "password_reset", "Password Reset"
+
+
+# Failed guesses allowed against one OTP before it's locked out - independent
+# of and in addition to request-rate throttling on the verify endpoints
+# themselves (see the "otp" throttle scope), since a 6-digit code is only
+# ~1M possibilities and needs its own hard ceiling regardless of how fast
+# someone can fire requests.
+MAX_OTP_ATTEMPTS = 5
+
+
+class EmailOTP(TimeStampedModel):
+    """
+    A short-lived, single-use secret emailed to prove control of an email
+    address - a 6-digit code for signup verification / login, or a long
+    random token embedded in a link for password reset (see
+    apps.users.services.issue_otp, which decides which). Hashed at rest
+    (same as a password) so a database leak doesn't hand out usable codes.
+    """
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="otps")
+    purpose = models.CharField(max_length=20, choices=OTPPurpose.choices)
+    code_hash = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    is_used = models.BooleanField(default=False)
+    failed_attempts = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["user", "purpose", "is_used"])]
+
+    def __str__(self):
+        return f"{self.get_purpose_display()} OTP for {self.user.email}"
+
+    def is_valid(self) -> bool:
+        return not self.is_used and self.failed_attempts < MAX_OTP_ATTEMPTS and timezone.now() < self.expires_at
