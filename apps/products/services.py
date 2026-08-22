@@ -21,12 +21,13 @@ def visible_products_queryset(user):
     # Explicit order_by: combining annotate()'s GROUP BY with Product's Meta
     # ordering alone is enough to make pagination emit an
     # UnorderedObjectListWarning (the aggregate can make Django lose track of
-    # the implicit default ordering), so state it outright instead.
+    # the implicit default ordering), so state it outright instead - kept in
+    # sync with Product.Meta.ordering.
     queryset = (
         Product.objects.select_related("category")
         .prefetch_related("images")
         .annotate(average_rating=Avg("reviews__rating"), review_count=Count("reviews"))
-        .order_by("-created_at")
+        .order_by("display_order", "-created_at")
     )
     if user.is_authenticated and user.is_admin:
         return queryset
