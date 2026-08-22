@@ -69,8 +69,13 @@ class Product(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     is_featured = models.BooleanField(default=False)
 
+    # Lower sorts first in the default "Newest" catalog view - lets us pin a
+    # product (e.g. the flagship item) ahead of items created after it,
+    # without faking created_at. Ties fall back to -created_at.
+    display_order = models.PositiveSmallIntegerField(default=0)
+
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ["display_order", "-created_at"]
         indexes = [
             models.Index(fields=["is_active", "is_featured"]),
             models.Index(fields=["category", "is_active"]),
