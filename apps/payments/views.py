@@ -87,8 +87,11 @@ class PaymentDetailView(generics.RetrieveAPIView):
     lookup_field = "id"
 
     def get_queryset(self):
-        if self.request.user.is_admin:
-            return Payment.objects.all()
+        # Always scoped to the requester's own orders, admin role included -
+        # cross-customer payment lookups belong in Django admin (PaymentAdmin),
+        # not this storefront-facing API. See the identical fix on
+        # AddressViewSet.get_queryset for why this bypass is a liability
+        # rather than a feature.
         return Payment.objects.filter(order__user=self.request.user)
 
     def retrieve(self, request, *args, **kwargs):

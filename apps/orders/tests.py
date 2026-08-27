@@ -10,9 +10,62 @@ from rest_framework.test import APITestCase
 
 from apps.orders import services
 from apps.orders.models import Address, Order, OrderStatus
-from apps.payments.models import Payment, PaymentStatus
+from apps.payments.models import Payment, PaymentGatewayChoice, PaymentStatus
 from apps.products.models import Category, Product
-from apps.users.models import ReferralCredit, User
+from apps.users.models import ReferralCredit, Role, User
+
+
+class AdminNeverSeesAnotherCustomersDataTests(APITestCase):
+    """
+    Regression test for a real bug: AddressViewSet/OrderViewSet/PaymentDetailView
+    used to broaden their queryset to "every row" whenever the requester's role
+    was admin - which meant the site owner's own admin account, logging into
+    the live storefront to place a personal order, was handed every customer's
+    name/phone/address (and every other order and payment) instead of just
+    their own. Cross-customer visibility belongs in Django admin, never in
+    these storefront-facing endpoints, regardless of the requester's role.
+    """
+
+    def setUp(self):
+        self.admin = User.objects.create_user(
+            email="owner@example.com", password="StrongPass123!", full_name="Owner", role=Role.ADMIN,
+        )
+        self.customer = User.objects.create_user(
+            email="cust@example.com", password="StrongPass123!", full_name="Cust",
+        )
+        self.customer_address = Address.objects.create(
+            user=self.customer, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        category = Category.objects.create(name="Ladoo")
+        product = Product.objects.create(category=category, name="Besan Ladoo", price=300, stock_quantity=5)
+        self.customer_order = Order.objects.create(
+            user=self.customer, address=self.customer_address, status=OrderStatus.PENDING,
+            subtotal_amount=300, total_amount=300,
+        )
+        self.customer_payment = Payment.objects.create(
+            order=self.customer_order, gateway=PaymentGatewayChoice.MANUAL,
+            status=PaymentStatus.PENDING, amount=300,
+        )
+        self.client.force_authenticate(user=self.admin)
+
+    def test_admin_listing_addresses_only_sees_their_own(self):
+        response = self.client.get(reverse("address-list"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["results"], [])
+
+    def test_admin_cannot_place_an_order_against_a_customers_address(self):
+        response = self.client.get(reverse("address-detail", args=[self.customer_address.id]))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_admin_listing_orders_only_sees_their_own(self):
+        response = self.client.get(reverse("order-list"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["results"], [])
+
+    def test_admin_fetching_a_payment_by_id_only_sees_their_own(self):
+        response = self.client.get(reverse("payment-detail", args=[self.customer_payment.id]))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
 
 class CartAndCheckoutTests(APITestCase):

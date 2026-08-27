@@ -26,14 +26,20 @@ from apps.orders.serializers import (
 
 
 class AddressViewSet(viewsets.ModelViewSet):
-    """/api/orders/addresses/ - a user's own shipping addresses (admins see all)."""
+    """
+    /api/orders/addresses/ - always the requesting user's own shipping
+    addresses, admin role included. Cross-user address management belongs
+    in Django admin (see AddressAdmin) - there's no legitimate reason for
+    this storefront-facing API to ever hand back another customer's name,
+    phone, or delivery address, and doing so previously leaked every
+    customer's address to whichever admin account happened to check out
+    on the live site.
+    """
 
     serializer_class = AddressSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.is_admin:
-            return Address.objects.all()
         return Address.objects.filter(user=self.request.user)
 
     def perform_create(self, serializer):
@@ -128,6 +134,16 @@ class OrderViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         base = Order.objects.select_related("address").prefetch_related("items", "status_history", "reviews")
+        # "My Orders" (list) must always mean "orders I placed," full stop -
+        # never broadened for admins, or the storefront's own order history
+        # page would dump every customer's order into whichever admin
+        # account happens to be checking out on the live site. Retrieve and
+        # the admin-only cancel/status actions below still resolve any
+        # order by id for the admin role (gated by IsOrderOwnerOrAdmin /
+        # IsAdmin), since those require knowing a specific order id rather
+        # than handing back a full cross-customer list.
+        if self.action == "list":
+            return base.filter(user=self.request.user)
         if self.request.user.is_admin:
             return base
         return base.filter(user=self.request.user)
