@@ -89,10 +89,21 @@ class OtpLoginRequestView(APIView):
         serializer = OtpLoginRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"].strip().lower()
-        user = User.objects.filter(email=email, is_active=True).first()
-        if user is not None:
-            services.send_login_otp(user)
-        return api_success(message="If that account exists, a login code has been sent.")
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            return api_error(
+                "No account found with this email.",
+                errors={"code": "account_not_found", "email": email},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not user.is_active:
+            return api_error(
+                "Please verify your email before logging in.",
+                errors={"code": "email_not_verified", "email": email},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        services.send_login_otp(user)
+        return api_success(message="We've sent a 6-digit login code to your email.")
 
 
 class OtpLoginVerifyView(APIView):

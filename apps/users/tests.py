@@ -208,7 +208,8 @@ class OtpLoginTests(APITestCase):
         })
         mail.outbox.clear()
         response = self.client.post(self.request_url, {"email": "unverified@example.com"})
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(response.data["errors"]["code"], "email_not_verified")
         self.assertEqual(len(mail.outbox), 0)
 
     def test_wrong_code_is_rejected(self):
@@ -216,9 +217,10 @@ class OtpLoginTests(APITestCase):
         response = self.client.post(self.verify_url, {"email": "test@example.com", "code": "000000"})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    def test_unknown_email_gets_generic_response_not_an_error(self):
+    def test_unknown_email_says_no_account_found(self):
         response = self.client.post(self.request_url, {"email": "nobody@example.com"})
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data["errors"]["code"], "account_not_found")
 
 
 class PasswordResetTests(APITestCase):
