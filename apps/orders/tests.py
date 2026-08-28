@@ -194,6 +194,52 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+class AbandonPendingOrderTests(APITestCase):
+    """Closing Razorpay Checkout without paying shouldn't leave a stray pending order - see abandon_pending_order."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="cust@example.com", password="StrongPass123!", full_name="Cust")
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Ladoo")
+        self.product = Product.objects.create(category=category, name="Besan Ladoo", price=300, stock_quantity=5)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
+        order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        self.order_id = order_response.data["data"]["id"]
+
+    def test_abandon_cancels_order_restores_stock_and_cart(self):
+        response = self.client.post(reverse("order-abandon", args=[self.order_id]))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        order = Order.objects.get(id=self.order_id)
+        self.assertEqual(order.status, OrderStatus.CANCELLED)
+
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, 5)
+
+        cart_response = self.client.get(reverse("cart-detail"))
+        self.assertEqual(len(cart_response.data["data"]["items"]), 1)
+        self.assertEqual(cart_response.data["data"]["items"][0]["quantity"], 2)
+
+    def test_cannot_abandon_someone_elses_order(self):
+        other_user = User.objects.create_user(email="other@example.com", password="StrongPass123!", full_name="Other")
+        self.client.force_authenticate(user=other_user)
+        response = self.client.post(reverse("order-abandon", args=[self.order_id]))
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_cannot_abandon_an_already_confirmed_order(self):
+        order = Order.objects.get(id=self.order_id)
+        order.status = OrderStatus.CONFIRMED
+        order.save(update_fields=["status"])
+        response = self.client.post(reverse("order-abandon", args=[self.order_id]))
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        order.refresh_from_db()
+        self.assertEqual(order.status, OrderStatus.CONFIRMED)
+
+
 class OrderPlacedCustomerEmailTests(APITestCase):
     """The itemized "thanks for your order" receipt - see notify_order_placed."""
 

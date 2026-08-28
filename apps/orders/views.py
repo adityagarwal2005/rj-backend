@@ -208,6 +208,20 @@ class OrderViewSet(viewsets.ModelViewSet):
         getattr(order, "_prefetched_objects_cache", {}).pop("status_history", None)
         return api_success(OrderSerializer(order).data, message="Order cancelled successfully.")
 
+    @action(detail=True, methods=["post"], url_path="abandon")
+    def abandon(self, request, pk=None):
+        """
+        POST /api/orders/{id}/abandon/ - customer backed out of payment
+        (closed Razorpay without paying). Cancels the still-unpaid order
+        and puts its items back in the cart - see services.abandon_pending_order.
+        """
+        order = self.get_object()
+        try:
+            services.abandon_pending_order(request.user, order)
+        except DjangoValidationError as exc:
+            return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
+        return api_success(CartSerializer(services.get_or_create_cart(request.user)).data, message="Order cancelled - items are back in your cart.")
+
     @action(detail=True, methods=["patch"], url_path="status", permission_classes=[IsAuthenticated, IsAdmin])
     def update_status(self, request, pk=None):
         order = self.get_object()

@@ -169,6 +169,38 @@ def cancel_order(order: Order) -> Order:
     return order
 
 
+@transaction.atomic
+def abandon_pending_order(user, order: Order) -> Order:
+    """
+    For the "opened Razorpay, closed it without paying" moment: an order is
+    created (and stock reserved) as soon as checkout starts, before payment
+    - deliberately, so that a slow payer doesn't lose the last unit to
+    someone else mid-checkout. But that means every abandoned attempt left
+    behind a permanent "pending" order cluttering the customer's order
+    history, forcing them to either finish paying an order they may have
+    changed their mind about or notice a stray "Pay Now" button later.
+
+    This both cancels the order (restoring stock, same as cancel_order) and
+    puts its items straight back in the customer's cart, so declining to
+    pay costs them nothing and they can simply try checkout again. Only
+    valid for PENDING orders - a CONFIRMED (already paid) order cancelled
+    later is a real refund case, not an abandoned checkout, and shouldn't
+    silently re-add itself to the cart.
+    """
+    order = Order.objects.select_for_update().get(pk=order.pk)
+    if order.user_id != user.id:
+        raise ValidationError("This order does not belong to you.")
+    if order.status != OrderStatus.PENDING:
+        raise ValidationError("Only a pending, unpaid order can be abandoned this way.")
+
+    items = list(order.items.select_related("product"))
+    cancel_order(order)
+    for item in items:
+        if item.product is not None and item.product.is_active:
+            add_item_to_cart(user, item.product, item.quantity)
+    return order
+
+
 def send_abandoned_order_reminders() -> int:
     """Nudge customers with a real unpaid order sitting untouched for a while. Sends at most once per order."""
     cutoff = timezone.now() - ABANDONED_REMINDER_DELAY
