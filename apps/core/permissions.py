@@ -28,14 +28,3 @@ class IsAdminOrReadOnly(BasePermission):
         return bool(
             request.user and request.user.is_authenticated and request.user.is_admin
         )
-
-
-class IsOwnerOrAdmin(BasePermission):
-    """Object-level check: the owning user or an admin may access it."""
-
-    def has_object_permission(self, request, view, obj):
-        owner_id = getattr(obj, "user_id", None)
-        return bool(
-            request.user.is_authenticated
-            and (request.user.is_admin or owner_id == request.user.id)
-        )

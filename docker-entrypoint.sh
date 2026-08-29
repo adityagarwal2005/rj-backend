@@ -1,7 +1,6 @@
 #!/bin/sh
-# Runs once per container start, before gunicorn takes over. Mirrors the
-# Render buildCommand/startCommand split (see render.yaml) but as a single
-# container lifecycle instead of a separate build step.
+# Runs once per container start, before gunicorn takes over: migrate, then
+# bootstrap the admin user, then hand off to the server.
 #
 # Migrations running here means a burst of simultaneous cold starts could
 # theoretically race each other. Low risk for this app's traffic, but if

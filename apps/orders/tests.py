@@ -37,8 +37,6 @@ class AdminNeverSeesAnotherCustomersDataTests(APITestCase):
             user=self.customer, full_name="Cust", phone="9999999999",
             line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
         )
-        category = Category.objects.create(name="Ladoo")
-        product = Product.objects.create(category=category, name="Besan Ladoo", price=300, stock_quantity=5)
         self.customer_order = Order.objects.create(
             user=self.customer, address=self.customer_address, status=OrderStatus.PENDING,
             subtotal_amount=300, total_amount=300,

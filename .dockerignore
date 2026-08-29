@@ -15,4 +15,3 @@ staticfiles/
 db.sqlite3
 .git/
 .github/
-render.yaml
