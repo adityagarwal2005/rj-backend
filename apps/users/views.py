@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from django.conf import settings
+
 from rest_framework import generics, status
 from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -9,6 +11,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.core.response import api_error, api_success
 from apps.users import services
+from apps.users.authentication import REFRESH_COOKIE, clear_auth_cookies, set_auth_cookies
 from apps.users.models import OTPPurpose, ReferralCredit, User
 from apps.users.serializers import (
     LoginSerializer,
@@ -59,7 +62,8 @@ class VerifyEmailView(APIView):
         user.is_active = True
         user.save(update_fields=["is_active"])
         tokens = services.issue_tokens_for_user(user)
-        return api_success(tokens, message="Email verified! You're all set.")
+        response = api_success(tokens, message="Email verified! You're all set.")
+        return set_auth_cookies(response, settings, tokens["access"], tokens["refresh"])
 
 
 class ResendOtpView(APIView):
@@ -120,7 +124,8 @@ class OtpLoginVerifyView(APIView):
         if user is None or not services.verify_otp(user, OTPPurpose.LOGIN, serializer.validated_data["code"]):
             return api_error("That code is invalid or has expired.", status=status.HTTP_400_BAD_REQUEST)
         tokens = services.issue_tokens_for_user(user)
-        return api_success(tokens, message="Login successful.")
+        response = api_success(tokens, message="Login successful.")
+        return set_auth_cookies(response, settings, tokens["access"], tokens["refresh"])
 
 
 class PasswordResetRequestView(APIView):
@@ -184,7 +189,9 @@ class LoginView(TokenObtainPairView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
             return api_error("Invalid email or password.", status=status.HTTP_401_UNAUTHORIZED)
-        return api_success(serializer.validated_data, message="Login successful.")
+        data = serializer.validated_data
+        response = api_success(data, message="Login successful.")
+        return set_auth_cookies(response, settings, data.get("access"), data.get("refresh"))
 
 
 class RefreshTokenView(TokenRefreshView):
@@ -193,12 +200,26 @@ class RefreshTokenView(TokenRefreshView):
     permission_classes = [AllowAny]
 
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        # The browser no longer has the refresh token in JavaScript, so it
+        # arrives as an httpOnly cookie. Body still wins when present, which
+        # keeps older clients and non-browser callers working.
+        payload = request.data
+        if not payload.get("refresh") and request.COOKIES.get(REFRESH_COOKIE):
+            payload = {**payload, "refresh": request.COOKIES[REFRESH_COOKIE]}
+
+        serializer = self.get_serializer(data=payload)
         try:
             serializer.is_valid(raise_exception=True)
         except (ValidationError, TokenError):
-            return api_error("Refresh token is invalid or expired.", status=status.HTTP_401_UNAUTHORIZED)
-        return api_success(serializer.validated_data, message="Token refreshed successfully.")
+            # Clear the cookies too: leaving a dead refresh cookie in place
+            # means the browser retries with it forever and never recovers
+            # into a clean logged-out state.
+            return clear_auth_cookies(
+                api_error("Refresh token is invalid or expired.", status=status.HTTP_401_UNAUTHORIZED)
+            )
+        data = serializer.validated_data
+        response = api_success(data, message="Token refreshed successfully.")
+        return set_auth_cookies(response, settings, data.get("access"), data.get("refresh"))
 
 
 class LogoutView(APIView):
@@ -207,13 +228,20 @@ class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        serializer = LogoutSerializer(data=request.data)
+        payload = request.data
+        if not payload.get("refresh") and request.COOKIES.get(REFRESH_COOKIE):
+            payload = {**payload, "refresh": request.COOKIES[REFRESH_COOKIE]}
+
+        serializer = LogoutSerializer(data=payload)
         serializer.is_valid(raise_exception=True)
         try:
             services.blacklist_refresh_token(serializer.validated_data["refresh"])
         except ValueError as exc:
-            return api_error(str(exc), status=status.HTTP_400_BAD_REQUEST)
-        return api_success(message="Logged out successfully.")
+            # Still clear the cookies. An un-blacklistable (already expired,
+            # already used) token must not leave the browser stuck in a
+            # half-logged-in state where it looks signed in but nothing works.
+            return clear_auth_cookies(api_error(str(exc), status=status.HTTP_400_BAD_REQUEST))
+        return clear_auth_cookies(api_success(message="Logged out successfully."))
 
 
 class ProfileView(generics.RetrieveUpdateAPIView):

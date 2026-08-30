@@ -288,3 +288,81 @@ class EmailOtpModelTests(APITestCase):
         code = services.issue_otp(self.user, OTPPurpose.LOGIN)
         EmailOTP.objects.filter(user=self.user).update(expires_at=timezone.now() - timedelta(minutes=1))
         self.assertFalse(services.verify_otp(self.user, OTPPurpose.LOGIN, code))
+
+
+class CookieAuthTests(APITestCase):
+    """
+    Tokens moved out of localStorage into httpOnly cookies, so an XSS can no
+    longer read and exfiltrate a reusable session. See
+    apps.users.authentication.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            email="cookie@example.com", password="StrongPass123!", full_name="Cookie",
+        )
+
+    def _login(self):
+        return self.client.post(
+            reverse("auth-login"), {"email": "cookie@example.com", "password": "StrongPass123!"},
+        )
+
+    def test_login_sets_httponly_cookies(self):
+        response = self._login()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        access = response.cookies["rt_access"]
+        refresh = response.cookies["rt_refresh"]
+        # httponly is the whole point: unreadable from document.cookie.
+        self.assertTrue(access["httponly"])
+        self.assertTrue(refresh["httponly"])
+        # SameSite=Strict is what stands in for CSRF protection now that the
+        # browser attaches these automatically.
+        self.assertEqual(access["samesite"], "Strict")
+        self.assertEqual(refresh["samesite"], "Strict")
+        # The refresh token has no business being sent with every catalog call.
+        self.assertEqual(refresh["path"], "/api/auth")
+
+    def test_authenticated_request_works_with_only_the_cookie(self):
+        self._login()
+        # No Authorization header anywhere - the cookie alone must authenticate.
+        response = self.client.get(reverse("auth-profile"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["data"]["email"], "cookie@example.com")
+
+    def test_refresh_works_from_the_cookie_with_no_body(self):
+        self._login()
+        response = self.client.post(reverse("auth-refresh"), {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn("rt_access", response.cookies)
+
+    def test_logout_clears_both_cookies(self):
+        self._login()
+        response = self.client.post(reverse("auth-logout"), {})
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        # Django expresses deletion as an empty value with a past expiry.
+        self.assertEqual(response.cookies["rt_access"].value, "")
+        self.assertEqual(response.cookies["rt_refresh"].value, "")
+
+    def test_authorization_header_still_authenticates(self):
+        """
+        Kept working on purpose so backend and frontend can deploy in either
+        order without a window where every request 401s.
+        """
+        tokens = self._login().data["data"]
+        self.client.cookies.clear()
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens['access']}")
+        response = self.client.get(reverse("auth-profile"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_an_invalid_refresh_cookie_is_cleared_rather_than_left_to_loop(self):
+        self._login()
+        self.client.cookies["rt_refresh"] = "not-a-real-token"
+        response = self.client.post(reverse("auth-refresh"), {})
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.cookies["rt_refresh"].value, "")
+
+    def test_no_cookie_and_no_header_is_unauthenticated(self):
+        response = self.client.get(reverse("auth-profile"))
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
