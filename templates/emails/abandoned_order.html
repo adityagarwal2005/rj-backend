@@ -1,0 +1,11 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p style="margin:0 0 22px 0; font-size:15px; line-height:1.7; color:#3a2f28;">
+    Hi {{ first_name }}, your order is still waiting on payment. We&rsquo;ve kept it aside for now &mdash;
+    unpaid orders are released back to stock after 48 hours.
+  </p>
+
+  {% include "emails/_order_items.html" with items=items order=order show_totals=1 %}
+
+  {% if order_url %}{% include "emails/_button.html" with url=order_url label="Complete my order" %}{% endif %}
+{% endblock %}

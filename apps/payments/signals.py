@@ -31,5 +31,10 @@ def confirm_order_on_payment_success(sender, instance: Payment, **kwargs):
     order.status = OrderStatus.CONFIRMED
     order.save(update_fields=["status"])
     order_services.record_status_change(order)
+    # The customer receipt and admin alert belong here, on real payment -
+    # not at order creation, where they used to fire for payments that were
+    # never completed. notify_order_placed_once is a no-op for COD and
+    # WhatsApp orders, which already sent theirs at checkout.
+    order_services.notify_order_placed_once(order)
     notification_services.notify_order_status_change(order)
     referrals.grant_referrer_reward_if_eligible(order)

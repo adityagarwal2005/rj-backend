@@ -103,6 +103,14 @@ class Order(UUIDPrimaryKeyModel, TimeStampedModel):
     # Set once an abandoned-cart reminder has been sent for this order, so it
     # only ever gets nudged once - see apps.orders.services.send_abandoned_order_reminders.
     abandoned_reminder_sent_at = models.DateTimeField(null=True, blank=True)
+    # Set the first time the "order placed" emails go out (customer receipt +
+    # admin alert). Those used to fire at order creation, which meant opening
+    # Razorpay and closing it without paying still sent a receipt and an admin
+    # alert - and every retry created another order and another pair of emails.
+    # They now fire on payment success (or on COD/WhatsApp checkout, which have
+    # no upfront payment), and this timestamp keeps that exactly-once even when
+    # Razorpay retries its webhook or the client callback races it.
+    placed_notified_at = models.DateTimeField(null=True, blank=True)
     is_gift = models.BooleanField(default=False)
     gift_message = models.TextField(blank=True)
 

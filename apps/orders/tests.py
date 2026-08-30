@@ -251,10 +251,29 @@ class OrderPlacedCustomerEmailTests(APITestCase):
             line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
         )
 
-    def test_website_order_gets_an_itemized_receipt(self):
+    def _pay(self, order_id, amount):
+        """Mark the order paid the way a real gateway callback does."""
+        payment = Payment.objects.create(order_id=order_id, gateway="razorpay", amount=amount)
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+        return payment
+
+    def test_creating_an_order_sends_nothing_until_it_is_paid(self):
+        """
+        Regression test: these emails used to fire at order creation, so
+        opening Razorpay and closing it without paying still sent a receipt
+        and an admin alert - once per retry.
+        """
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         self.client.post(reverse("order-list"), {"address_id": self.address.id})
-        customer_emails = [m for m in mail.outbox if m.to == [self.user.email]]
+        self.assertEqual([m for m in mail.outbox if m.to == [self.user.email]], [])
+
+    def test_website_order_gets_an_itemized_receipt_once_paid(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
+        order_id = self.client.post(reverse("order-list"), {"address_id": self.address.id}).data["data"]["id"]
+        self._pay(order_id, 240)
+
+        customer_emails = [m for m in mail.outbox if m.to == [self.user.email] and "Thanks for your order" in m.subject]
         self.assertEqual(len(customer_emails), 1)
         email = customer_emails[0]
         self.assertIn("Thanks for your order", email.subject)
@@ -285,12 +304,37 @@ class AdminNewOrderAlertTests(APITestCase):
         )
 
     @override_settings(ADMIN_EMAIL="owner@example.com")
-    def test_website_checkout_emails_the_admin(self):
+    def test_unpaid_website_order_does_not_alert_the_admin(self):
+        """The admin should hear about an order when it is paid for, not when a payment sheet opens."""
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
         self.client.post(reverse("order-list"), {"address_id": self.address.id})
-        admin_emails = [m for m in mail.outbox if m.to == ["owner@example.com"]]
+        self.assertEqual([m for m in mail.outbox if m.to == ["owner@example.com"]], [])
+
+    @override_settings(ADMIN_EMAIL="owner@example.com")
+    def test_website_checkout_emails_the_admin_once_paid(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_id = self.client.post(reverse("order-list"), {"address_id": self.address.id}).data["data"]["id"]
+        payment = Payment.objects.create(order_id=order_id, gateway="razorpay", amount=120)
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+
+        admin_emails = [m for m in mail.outbox if m.to == ["owner@example.com"] and "New order" in m.subject]
         self.assertEqual(len(admin_emails), 1)
         self.assertIn("website", admin_emails[0].subject.lower())
+
+    @override_settings(ADMIN_EMAIL="owner@example.com")
+    def test_a_retried_payment_webhook_does_not_send_a_second_alert(self):
+        """Razorpay retries webhooks, and the browser callback can race them."""
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        order_id = self.client.post(reverse("order-list"), {"address_id": self.address.id}).data["data"]["id"]
+        payment = Payment.objects.create(order_id=order_id, gateway="razorpay", amount=120)
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+        payment.save()  # duplicate delivery
+        Payment.objects.get(pk=payment.pk).save()
+
+        admin_emails = [m for m in mail.outbox if m.to == ["owner@example.com"] and "New order" in m.subject]
+        self.assertEqual(len(admin_emails), 1)
 
     @override_settings(ADMIN_EMAIL="owner@example.com")
     def test_whatsapp_checkout_emails_the_admin(self):
@@ -302,12 +346,15 @@ class AdminNewOrderAlertTests(APITestCase):
 
     @override_settings(ADMIN_EMAIL="")
     def test_no_admin_email_configured_is_a_silent_noop(self):
-        """Order creation still emails the customer (notify_order_placed) - just never the (unset) admin."""
+        """A paid order still emails the customer - just never the (unset) admin."""
         self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
-        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(len(mail.outbox), 1)  # the customer's "order placed" email only
-        self.assertEqual(mail.outbox[0].to, [self.user.email])
+        order_id = self.client.post(reverse("order-list"), {"address_id": self.address.id}).data["data"]["id"]
+        payment = Payment.objects.create(order_id=order_id, gateway="razorpay", amount=120)
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+
+        recipients = {tuple(m.to) for m in mail.outbox}
+        self.assertEqual(recipients, {(self.user.email,)})
 
 
 class BulkUnitPricingTests(APITestCase):

@@ -1,0 +1,39 @@
+{% comment %}Itemised order table, shared by the customer receipt and the admin alert.{% endcomment %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+       style="margin:0 0 20px 0; border-collapse:collapse; font-family:Georgia,'Times New Roman',serif;">
+  {% for item in items %}
+  <tr>
+    <td style="padding:10px 0; border-bottom:1px solid #ede0d0; font-size:15px; color:#241512;">
+      {{ item.product_name }}
+      <span style="color:#8a7768;">&times; {{ item.quantity }}</span>
+    </td>
+    <td align="right" style="padding:10px 0; border-bottom:1px solid #ede0d0; font-size:15px; color:#241512; white-space:nowrap;">
+      &#8377;{{ item.subtotal }}
+    </td>
+  </tr>
+  {% endfor %}
+  {% if show_totals %}
+    <tr>
+      <td style="padding:12px 0 0 0; font-size:14px; color:#8a7768;">Subtotal</td>
+      <td align="right" style="padding:12px 0 0 0; font-size:14px; color:#8a7768; white-space:nowrap;">&#8377;{{ order.subtotal_amount }}</td>
+    </tr>
+    {% if order.discount_amount and order.discount_amount > 0 %}
+    <tr>
+      <td style="padding:4px 0 0 0; font-size:14px; color:#14776b;">Bulk discount ({{ order.discount_percentage }}%)</td>
+      <td align="right" style="padding:4px 0 0 0; font-size:14px; color:#14776b; white-space:nowrap;">&minus;&#8377;{{ order.discount_amount }}</td>
+    </tr>
+    {% endif %}
+    {% if order.referral_discount_amount and order.referral_discount_amount > 0 %}
+    <tr>
+      <td style="padding:4px 0 0 0; font-size:14px; color:#14776b;">Referral discount</td>
+      <td align="right" style="padding:4px 0 0 0; font-size:14px; color:#14776b; white-space:nowrap;">&minus;&#8377;{{ order.referral_discount_amount }}</td>
+    </tr>
+    {% endif %}
+    <tr>
+      <td style="padding:12px 0 0 0; border-top:2px solid #241610; font-size:17px; color:#241610;">Total</td>
+      <td align="right" style="padding:12px 0 0 0; border-top:2px solid #241610; font-size:17px; color:#241610; white-space:nowrap;">
+        &#8377;{{ order.total_amount }}
+      </td>
+    </tr>
+  {% endif %}
+</table>

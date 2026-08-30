@@ -192,6 +192,10 @@ class OrderViewSet(viewsets.ModelViewSet):
             )
         except DjangoValidationError as exc:
             return api_error(str(exc.message) if hasattr(exc, "message") else str(exc), status=status.HTTP_400_BAD_REQUEST)
+        # WhatsApp checkout has no online payment to wait for - the customer
+        # is handed straight to chat, so this is the point the order becomes
+        # real and the admin needs to know about it.
+        services.notify_order_placed_once(order)
         return api_success(
             OrderSerializer(order).data,
             message="Order created - continue on WhatsApp to share your address and complete payment.",

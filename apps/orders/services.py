@@ -148,9 +148,41 @@ def create_order_from_cart(
     cart_items_ids = [item.id for item in cart_items]
     CartItem.objects.filter(id__in=cart_items_ids).delete()
 
+    # Deliberately NOT notifying here. An order row exists as soon as
+    # checkout starts - before the customer has paid, and before they may
+    # have even seen the payment sheet - so emailing at this point sent a
+    # "thanks for your order" receipt and an admin alert for payments that
+    # were then abandoned, once per retry. See notify_order_placed_once for
+    # where these now fire.
+    return order
+
+
+def notify_order_placed_once(order) -> bool:
+    """
+    Send the customer receipt and admin alert for an order, at most once.
+
+    Called from the points where an order actually becomes real: a
+    successful payment, or a COD/WhatsApp checkout (neither of which has an
+    upfront online payment to wait for). Guarded by a timestamp because
+    Razorpay retries its webhook and the browser callback can race it, and
+    two "you've been paid" emails for one order is its own bug.
+
+    Returns whether it actually sent, mostly so tests can assert on it.
+    """
+    if order.placed_notified_at is not None:
+        return False
+
+    updated = Order.objects.filter(pk=order.pk, placed_notified_at__isnull=True).update(
+        placed_notified_at=timezone.now()
+    )
+    if not updated:
+        # Another concurrent caller claimed it first.
+        return False
+
+    order.refresh_from_db(fields=["placed_notified_at"])
     notification_services.notify_order_placed(order)
     notification_services.notify_admin_new_order(order)
-    return order
+    return True
 
 
 @transaction.atomic

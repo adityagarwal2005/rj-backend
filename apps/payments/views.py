@@ -9,6 +9,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 
 from apps.core.response import api_error, api_success
+from apps.orders import services as order_services
 from apps.payments import services
 from apps.payments.models import Payment, PaymentGatewayChoice, PaymentStatus
 from apps.payments.serializers import (
@@ -46,6 +47,16 @@ class InitiatePaymentView(APIView):
             )
         except (DjangoValidationError, NotImplementedError) as exc:
             return api_error(str(exc), status=status.HTTP_400_BAD_REQUEST)
+
+        # Cash on Delivery has no online payment to wait for, so this is the
+        # moment the order becomes real: the customer has committed and the
+        # admin needs to know to prepare and deliver it. Every other gateway
+        # notifies on payment success instead (see apps.payments.signals) -
+        # notifying here for those is what sent receipts for payments the
+        # customer opened and then abandoned.
+        if payment.gateway == PaymentGatewayChoice.COD:
+            order_services.notify_order_placed_once(payment.order)
+
         return api_success(
             {"payment": PaymentSerializer(payment).data, "gateway_data": intent_data},
             message="Payment initiated.",

@@ -1,0 +1,22 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p style="margin:0 0 22px 0; font-size:15px; line-height:1.7; color:#3a2f28;">
+    Thank you for ordering from RajwadiTukda{% if first_name %}, {{ first_name }}{% endif %}! Here&rsquo;s what
+    we&rsquo;re making for you.
+  </p>
+
+  {% include "emails/_order_items.html" with items=items order=order show_totals=1 %}
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;">
+    <tr>
+      <td style="background-color:#faf5ec; border-radius:12px; padding:16px 18px; font-family:Georgia,'Times New Roman',serif;">
+        <p style="margin:0 0 4px 0; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:#8f6f39;">Order ID</p>
+        <p style="margin:0; font-size:14px; color:#241512; word-break:break-all;">{{ order.id }}</p>
+      </td>
+    </tr>
+  </table>
+
+  <p style="margin:0 0 20px 0; font-size:15px; line-height:1.7; color:#3a2f28;">{{ next_steps }}</p>
+
+  {% if order_url %}{% include "emails/_button.html" with url=order_url label="View my order" %}{% endif %}
+{% endblock %}

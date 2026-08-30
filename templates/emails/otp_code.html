@@ -1,0 +1,22 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p style="margin:0 0 20px 0; font-size:15px; line-height:1.7; color:#3a2f28;">{{ intro }}</p>
+
+  {% comment %}
+    The code as text, not an image: it has to be selectable and copyable,
+    and must survive images being blocked.
+  {% endcomment %}
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px 0;">
+    <tr>
+      <td align="center" style="background-color:#faf5ec; border:1px solid #e3d2ba; border-radius:12px; padding:22px 16px;">
+        <div style="font-family:Georgia,'Times New Roman',serif; font-size:34px; letter-spacing:0.35em;
+                    color:#241610; font-weight:bold; text-indent:0.35em;">{{ code }}</div>
+      </td>
+    </tr>
+  </table>
+
+  <p style="margin:0; font-size:14px; line-height:1.7; color:#6b5a4e;">
+    This code expires in {{ expiry_minutes }} minutes. If you didn&rsquo;t request it, you can safely ignore
+    this email &mdash; nothing will change on your account.
+  </p>
+{% endblock %}

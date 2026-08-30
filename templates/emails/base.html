@@ -1,0 +1,86 @@
+{% comment %}
+Shared shell for every transactional email.
+
+Written to the constraints of email clients, not the web:
+  - Table-based layout. Gmail, Outlook and most Android clients still do not
+    honour flexbox or grid.
+  - Every style inlined. Gmail strips <style> blocks entirely, so anything
+    that matters cannot live in one.
+  - No external CSS or webfonts; Georgia is used because it ships on
+    essentially every device, and falls back to any serif.
+  - The logo is a hosted PNG rather than the site's SVG favicon - Gmail and
+    Outlook do not render SVG at all - and carries alt text so the email
+    still reads correctly with images blocked, which is the default in many
+    clients.
+  - Max width 600px, the long-standing safe width for mobile clients.
+{% endcomment %}<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>{{ subject }}</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#f5ede4; -webkit-font-smoothing:antialiased;">
+    {% comment %}Preheader: the grey preview line next to the subject in most inboxes. Hidden in the body itself.{% endcomment %}
+    <div style="display:none; font-size:1px; color:#f5ede4; line-height:1px; max-height:0; max-width:0; opacity:0; overflow:hidden;">
+      {{ preheader|default:subject }}
+    </div>
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f5ede4;">
+      <tr>
+        <td align="center" style="padding:32px 16px;">
+
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#ffffff; border-radius:16px; overflow:hidden; box-shadow:0 2px 12px rgba(36,22,16,0.08);">
+
+            <tr>
+              <td align="center" style="background-color:#241610; padding:28px 24px;">
+                <img src="{{ logo_url }}" width="260" alt="RajwadiTukda — Chocolate of the Pink City"
+                     style="display:block; width:260px; max-width:80%; height:auto; border:0;" />
+              </td>
+            </tr>
+            {% comment %}Gold hairline, echoing the site's dividers.{% endcomment %}
+            <tr><td style="height:3px; background-color:#c6a15b; font-size:0; line-height:0;">&nbsp;</td></tr>
+
+            <tr>
+              <td style="padding:36px 32px 28px 32px; font-family:Georgia,'Times New Roman',serif; color:#241512;">
+                <h1 style="margin:0 0 8px 0; font-size:24px; line-height:1.25; font-weight:normal; color:#241610;">
+                  {{ heading }}
+                </h1>
+                {% if subheading %}
+                  <p style="margin:0 0 24px 0; font-size:15px; line-height:1.6; color:#6b5a4e;">{{ subheading }}</p>
+                {% else %}
+                  <div style="height:16px; font-size:0; line-height:0;">&nbsp;</div>
+                {% endif %}
+
+                {% block content %}{% endblock %}
+              </td>
+            </tr>
+
+            <tr>
+              <td style="padding:0 32px 32px 32px; font-family:Georgia,'Times New Roman',serif;">
+                <div style="height:1px; background-color:#ede0d0; font-size:0; line-height:0;">&nbsp;</div>
+                <p style="margin:20px 0 0 0; font-size:13px; line-height:1.7; color:#8a7768;">
+                  Questions? Just reply to this email, or message us on
+                  <a href="https://wa.me/917014253541" style="color:#8f6f39; text-decoration:underline;">WhatsApp</a>.
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td align="center" style="background-color:#241610; padding:22px 24px; font-family:Georgia,'Times New Roman',serif;">
+                <p style="margin:0 0 6px 0; font-size:13px; color:#e2c691;">Padharo sa — from our kitchen to yours</p>
+                <p style="margin:0; font-size:11px; line-height:1.6; color:rgba(251,246,239,0.5);">
+                  RajwadiTukda &middot; Bani Park, Jaipur, Rajasthan<br />
+                  Handcrafted chocolate, made fresh to order.
+                </p>
+              </td>
+            </tr>
+
+          </table>
+
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
