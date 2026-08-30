@@ -116,8 +116,13 @@ def create_order_from_cart(
 
     discount_percentage, discount_amount = bulk_discount_for_subtotal(subtotal_amount)
 
-    referral_discount_amount = referrals.referee_discount_for(user, is_first_order)
-    if referral_credit is not None:
+    # Both referral benefits are gated on the same order-value minimum, so a
+    # referral can never be worth more than the order that triggered it - see
+    # referrals.REFERRAL_MIN_ORDER_SUBTOTAL. A credit that doesn't qualify is
+    # deliberately left unspent rather than consumed, so it stays available
+    # for a later, larger order.
+    referral_discount_amount = referrals.referee_discount_for(user, is_first_order, subtotal_amount)
+    if referral_credit is not None and referrals.meets_referral_minimum(subtotal_amount):
         referral_discount_amount += referral_credit.amount
         referral_credit.is_used = True
         referral_credit.used_on_order = order

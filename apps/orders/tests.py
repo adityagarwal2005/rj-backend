@@ -401,33 +401,33 @@ class ReferralProgramTests(APITestCase):
         )
         self.client.force_authenticate(user=self.user)
         category = Category.objects.create(name="Chocolates")
-        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=150, stock_quantity=10)
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=150, stock_quantity=20)
         self.address = Address.objects.create(
             user=self.user, full_name="Cust", phone="9999999999",
             line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
         )
 
     def test_referee_gets_discount_on_first_order(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         data = response.data["data"]
         self.assertEqual(data["referral_discount_amount"], "30.00")
-        self.assertEqual(data["total_amount"], "120.00")
+        self.assertEqual(data["total_amount"], "270.00")
 
     def test_referee_discount_does_not_apply_on_second_order(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         self.client.post(reverse("order-list"), {"address_id": self.address.id})
 
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         self.assertEqual(response.data["data"]["referral_discount_amount"], "0.00")
 
     def test_referrer_earns_credit_when_referee_order_is_confirmed(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         order_response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
         order_id = order_response.data["data"]["id"]
 
-        payment = Payment.objects.create(order_id=order_id, gateway="manual", amount=120)
+        payment = Payment.objects.create(order_id=order_id, gateway="manual", amount=270)
         payment.status = PaymentStatus.SUCCESS
         payment.save()
 
@@ -444,7 +444,7 @@ class ReferralProgramTests(APITestCase):
         )
         referrer_address = self.referrer.addresses.first()
 
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         response = self.client.post(reverse("order-list"), {"address_id": referrer_address.id})
 
         self.assertEqual(response.data["data"]["referral_discount_amount"], "30.00")
@@ -459,7 +459,7 @@ class ReferralProgramTests(APITestCase):
         )
         referrer_address = self.referrer.addresses.first()
 
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         order_response = self.client.post(reverse("order-list"), {"address_id": referrer_address.id})
         order_id = order_response.data["data"]["id"]
 
@@ -470,10 +470,78 @@ class ReferralProgramTests(APITestCase):
         self.assertIsNone(credit.used_on_order_id)
 
     def test_cart_preview_includes_referral_discount(self):
-        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 1})
+        self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 2})
         response = self.client.get(reverse("cart-detail"))
         self.assertEqual(response.data["data"]["referral_discount_amount"], Decimal("30"))
-        self.assertEqual(response.data["data"]["total_amount"], Decimal("120"))
+        self.assertEqual(response.data["data"]["total_amount"], Decimal("270"))
+
+
+class ReferralAbuseGuardTests(APITestCase):
+    """
+    The referral programme used to pay out more than a small order was worth,
+    which made it farmable: sign up a second account with your own referral
+    code, buy the cheapest item for a fraction of its price thanks to the ₹30
+    referee discount, and once that order is paid the first account earns a
+    ₹30 credit. Net gain per cycle, repeatable with disposable emails, and we
+    absorb the delivery cost every time. Both referral benefits are now gated
+    on referrals.REFERRAL_MIN_ORDER_SUBTOTAL.
+    """
+
+    def setUp(self):
+        self.referrer = User.objects.create_user(
+            email="friend@example.com", password="StrongPass123!", full_name="Friend",
+        )
+        self.user = User.objects.create_user(
+            email="cust@example.com", password="StrongPass123!", full_name="Cust", referred_by=self.referrer,
+        )
+        self.client.force_authenticate(user=self.user)
+        category = Category.objects.create(name="Lollipops")
+        # Deliberately the real cheap product that made the exploit pay.
+        self.cheap = Product.objects.create(
+            category=category, name="Kunafa Lollipop", price=40, stock_quantity=50,
+        )
+        self.address = Address.objects.create(
+            user=self.user, full_name="Cust", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+
+    def test_referee_discount_is_not_applied_below_the_minimum(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.cheap.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        data = response.data["data"]
+        self.assertEqual(data["referral_discount_amount"], "0.00")
+        # Full price - the ₹40 lollipop can no longer be bought for ₹10.
+        self.assertEqual(data["total_amount"], "40.00")
+
+    def test_referee_discount_applies_once_the_order_clears_the_minimum(self):
+        self.client.post(reverse("cart-item-list"), {"product_id": self.cheap.id, "quantity": 8})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+        data = response.data["data"]
+        self.assertEqual(data["subtotal_amount"], "320.00")
+        self.assertEqual(data["referral_discount_amount"], "30.00")
+
+    def test_cart_preview_matches_what_checkout_actually_charges(self):
+        """
+        The preview used to ignore the minimum, so a ₹40 cart advertised
+        "₹10 to pay" and then charged ₹40 at checkout.
+        """
+        self.client.post(reverse("cart-item-list"), {"product_id": self.cheap.id, "quantity": 1})
+        cart = self.client.get(reverse("cart-detail")).data["data"]
+        order = self.client.post(reverse("order-list"), {"address_id": self.address.id}).data["data"]
+
+        self.assertEqual(Decimal(cart["referral_discount_amount"]), Decimal(order["referral_discount_amount"]))
+        self.assertEqual(Decimal(cart["total_amount"]), Decimal(order["total_amount"]))
+
+    def test_credit_is_left_unspent_rather_than_burned_on_a_small_order(self):
+        """A credit that can't be applied yet must stay available, not be silently consumed."""
+        ReferralCredit.objects.create(user=self.user, amount=30)
+        self.client.post(reverse("cart-item-list"), {"product_id": self.cheap.id, "quantity": 1})
+        response = self.client.post(reverse("order-list"), {"address_id": self.address.id})
+
+        self.assertEqual(response.data["data"]["referral_discount_amount"], "0.00")
+        credit = ReferralCredit.objects.get(user=self.user)
+        self.assertFalse(credit.is_used)
+        self.assertIsNone(credit.used_on_order_id)
 
 
 class AbandonedOrderTests(APITestCase):

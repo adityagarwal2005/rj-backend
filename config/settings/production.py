@@ -1,6 +1,38 @@
+import os
+
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa: F401,F403
 
 DEBUG = False
+
+# --- Fail fast on a misconfigured production environment ---
+#
+# base.py gives SECRET_KEY a development fallback so `manage.py` works out of
+# the box. In production that fallback is a serious liability: the value is
+# hardcoded and public in this repo, and SECRET_KEY signs session cookies,
+# password-reset tokens and (via simplejwt's default) the JWTs themselves.
+# Booting with it would let anyone who read this file forge a login for any
+# account. Previously a missing or misspelled SECRET_KEY env var would have
+# done exactly that, silently and with the site looking perfectly healthy.
+#
+# Skipped during the image build: the Dockerfile runs collectstatic with
+# these settings but deliberately without real secrets, since collectstatic
+# touches neither the key nor the database.
+if not os.environ.get("DJANGO_COLLECTSTATIC_ONLY"):
+    if SECRET_KEY == "unsafe-dev-key-change-me":  # noqa: F405
+        raise ImproperlyConfigured(
+            "SECRET_KEY is still the development fallback. Set a real, random "
+            "SECRET_KEY environment variable before serving production traffic."
+        )
+    if len(SECRET_KEY) < 50:  # noqa: F405
+        raise ImproperlyConfigured(
+            "SECRET_KEY is too short for production (needs at least 50 characters)."
+        )
+    if not ALLOWED_HOSTS:  # noqa: F405
+        raise ImproperlyConfigured(
+            "ALLOWED_HOSTS is empty. Set it to the host(s) this service is served on."
+        )
 
 # Cloud Run (and most reverse proxies) terminate TLS at the load balancer,
 # then forward to gunicorn over plain HTTP - so without this, Django can

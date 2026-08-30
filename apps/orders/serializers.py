@@ -72,7 +72,7 @@ class CartSerializer(serializers.ModelSerializer):
         ]
 
     def get_referral_discount_amount(self, obj):
-        return referrals.total_referral_discount_for(obj.user)
+        return referrals.total_referral_discount_for(obj.user, obj.subtotal_amount)
 
     def get_total_amount(self, obj):
         return obj.total_amount - self.get_referral_discount_amount(obj)
