@@ -1,10 +1,15 @@
+import logging
+
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
 
+from apps.analytics.geo import geo_from_request
 from apps.analytics.models import PageView
 from apps.analytics.serializers import PageViewSerializer
 from apps.core.response import api_success
+
+logger = logging.getLogger("django")
 
 
 class PageViewCreateView(generics.CreateAPIView):
@@ -22,5 +27,8 @@ class PageViewCreateView(generics.CreateAPIView):
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        # Location comes from the edge's request headers, never from the
+        # request body - the serializer doesn't expose these fields, so a
+        # client cannot claim to be somewhere it isn't.
+        serializer.save(**geo_from_request(request))
         return api_success(message="Recorded", status=201)

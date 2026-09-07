@@ -21,6 +21,12 @@
   table.rt-table { width: 100%; border-collapse: collapse; }
   table.rt-table th, table.rt-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border-color, #eee); font-size: 13px; }
   .rt-empty { opacity: .6; font-style: italic; padding: 8px 0; }
+  .rt-split { display: flex; flex-wrap: wrap; gap: 28px; }
+  .rt-split > div { flex: 1 1 320px; min-width: 280px; }
+  .rt-bar { background: #af8a48; height: 10px; border-radius: 5px; min-width: 2px; display: inline-block; vertical-align: middle; }
+  .rt-bar-cell { width: 45%; }
+  .rt-muted { opacity: .6; font-size: 12px; }
+  td.rt-num, th.rt-num { text-align: right; white-space: nowrap; }
 </style>
 
 <div class="rt-cards">
@@ -89,6 +95,76 @@
   <div class="rt-empty">None right now.</div>
   {% endif %}
 </div>
+
+
+<div class="rt-section">
+  <h2>Visitors by day, last 7 days</h2>
+  <table class="rt-table">
+    <tr><th>Day</th><th class="rt-num">Visitors</th><th class="rt-num">Pageviews</th><th class="rt-bar-cell"></th></tr>
+    {% for row in traffic_by_day %}
+    <tr>
+      <td>{{ row.label }}</td>
+      <td class="rt-num">{{ row.visitors }}</td>
+      <td class="rt-num">{{ row.views }}</td>
+      <td class="rt-bar-cell">
+        {% if row.visitors %}
+          {% widthratio row.visitors max_day_visitors 100 as pct %}
+          <span class="rt-bar" style="width: {{ pct }}%;"></span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="rt-muted">
+    Counted in Jaipur time. &ldquo;Visitors&rdquo; counts each device once per day; pageviews counts every screen they opened.
+  </p>
+</div>
+
+<div class="rt-section rt-split">
+  <div>
+    <h2>Cities, last 7 days</h2>
+    {% if top_cities %}
+    <table class="rt-table">
+      <tr><th>City</th><th class="rt-num">Visitors</th><th class="rt-num">Views</th></tr>
+      {% for row in top_cities %}
+      <tr>
+        <td>{{ row.city }}{% if row.region %} <span class="rt-muted">&middot; {{ row.region }}</span>{% endif %}</td>
+        <td class="rt-num">{{ row.visitors }}</td>
+        <td class="rt-num">{{ row.views }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="rt-empty">No location data yet.</div>
+    {% endif %}
+  </div>
+
+  <div>
+    <h2>States, last 7 days</h2>
+    {% if top_states %}
+    <table class="rt-table">
+      <tr><th>State</th><th class="rt-num">Visitors</th><th class="rt-num">Views</th></tr>
+      {% for row in top_states %}
+      <tr>
+        <td>{{ row.region }}</td>
+        <td class="rt-num">{{ row.visitors }}</td>
+        <td class="rt-num">{{ row.views }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="rt-empty">No location data yet.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if unknown_location_views %}
+<p class="rt-muted">
+  {{ unknown_location_views }} view{{ unknown_location_views|pluralize }} in the last 7 days had no location.
+  That is normal for visits that didn&rsquo;t come through the site&rsquo;s own domain &mdash; and for anything recorded
+  before location tracking was added.
+</p>
+{% endif %}
 
 <div class="rt-section">
   <h2>Top pages, last 7 days</h2>

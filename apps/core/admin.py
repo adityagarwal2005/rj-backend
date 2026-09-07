@@ -11,6 +11,7 @@ from datetime import timedelta
 
 from django.contrib import admin
 from django.db.models import Count, Sum
+from django.db.models.functions import TruncDate
 from django.shortcuts import render
 from django.urls import path
 from django.utils import timezone
@@ -45,6 +46,55 @@ def dashboard_view(request):
         .order_by("-views")[:8]
     )
 
+    # --- Traffic by day / place (last 7 days) ---
+    #
+    # Counted per day in the store's own timezone (TIME_ZONE is Asia/Kolkata),
+    # so "yesterday" means yesterday in Jaipur rather than in UTC - otherwise
+    # every evening's traffic lands on the wrong day.
+    recent = PageView.objects.filter(created_at__gte=week_start)
+
+    by_day_rows = (
+        recent.annotate(day=TruncDate("created_at"))
+        .values("day")
+        .annotate(views=Count("id"), visitors=Count("visitor_id", distinct=True))
+        .order_by("-day")
+    )
+    # Fill in days with no traffic, so a quiet day reads as a zero rather
+    # than silently vanishing from the table.
+    counts_by_day = {row["day"]: row for row in by_day_rows}
+    today_local = timezone.localdate()
+    traffic_by_day = []
+    for offset in range(7):
+        day = today_local - timedelta(days=offset)
+        row = counts_by_day.get(day)
+        traffic_by_day.append({
+            "day": day,
+            "label": "Today" if offset == 0 else ("Yesterday" if offset == 1 else day.strftime("%a %d %b")),
+            "views": row["views"] if row else 0,
+            "visitors": row["visitors"] if row else 0,
+        })
+
+    # Scales the bars in the daily table. Floored at 1 so a week with no
+    # traffic at all doesn't divide by zero in the template.
+    max_day_visitors = max([row["visitors"] for row in traffic_by_day] + [1])
+
+    top_cities = (
+        recent.exclude(city="")
+        .values("city", "region")
+        .annotate(views=Count("id"), visitors=Count("visitor_id", distinct=True))
+        .order_by("-visitors")[:12]
+    )
+    top_states = (
+        recent.exclude(region="")
+        .values("region")
+        .annotate(views=Count("id"), visitors=Count("visitor_id", distinct=True))
+        .order_by("-visitors")[:12]
+    )
+    # Requests that never passed through the edge (local dev, or anything
+    # hitting the Cloud Run URL directly) have no location. Showing the
+    # count keeps the percentages above honest.
+    unknown_location_views = recent.filter(city="", region="").count()
+
     context = {
         **admin.site.each_context(request),
         "title": "Dashboard",
@@ -59,6 +109,11 @@ def dashboard_view(request):
         "pageviews_week": pageviews_week,
         "visitors_week": visitors_week,
         "top_paths": top_paths,
+        "traffic_by_day": traffic_by_day,
+        "max_day_visitors": max_day_visitors,
+        "top_cities": top_cities,
+        "top_states": top_states,
+        "unknown_location_views": unknown_location_views,
     }
     return render(request, "admin/dashboard.html", context)
 
