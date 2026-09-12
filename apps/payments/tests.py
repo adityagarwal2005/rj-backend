@@ -4,6 +4,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import razorpay
+from django.core import mail
 from django.test import override_settings
 from django.urls import reverse
 from rest_framework import status
@@ -109,6 +110,43 @@ class PaymentTests(APITestCase):
 
         wa_order.refresh_from_db()
         self.assertEqual(wa_order.status, "confirmed")
+
+
+class PaymentStateGuardTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email="guard@example.com", password="StrongPass123!", full_name="Guard")
+        self.client.force_authenticate(user=self.user)
+        self.address = Address.objects.create(
+            user=self.user, full_name="Guard", phone="9999999999",
+            line1="123 Street", city="Jaipur", state="Rajasthan", postal_code="302001",
+        )
+        self.order = Order.objects.create(user=self.user, address=self.address, subtotal_amount=300, total_amount=300)
+
+    def test_cannot_start_a_payment_on_a_cancelled_order(self):
+        Order.objects.filter(pk=self.order.pk).update(status="cancelled")
+        response = self.client.post(reverse("payment-initiate"), {"order_id": self.order.id, "gateway": "cod"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(Payment.objects.filter(order=self.order).exists())
+
+    def test_cannot_pay_twice_for_an_order_that_is_already_paid(self):
+        Payment.objects.create(order=self.order, gateway="manual", amount=300, status=PaymentStatus.SUCCESS)
+        response = self.client.post(reverse("payment-initiate"), {"order_id": self.order.id, "gateway": "manual"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(ADMIN_EMAIL="owner@example.com")
+    def test_payment_landing_on_a_cancelled_order_alerts_the_admin(self):
+        """The customer paid, but the order was already abandoned - someone has to refund or re-create it."""
+        payment = Payment.objects.create(order=self.order, gateway="razorpay", amount=300)
+        Order.objects.filter(pk=self.order.pk).update(status="cancelled")
+        mail.outbox.clear()
+
+        payment.status = PaymentStatus.SUCCESS
+        payment.save()
+
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "cancelled")
+        self.assertEqual([m.to for m in mail.outbox], [["owner@example.com"]])
+        self.assertIn("cancelled order", mail.outbox[0].subject)
 
 
 @override_settings(RAZORPAY_KEY_ID="rzp_test_123", RAZORPAY_KEY_SECRET="test_secret", RAZORPAY_WEBHOOK_SECRET="whsec_test")

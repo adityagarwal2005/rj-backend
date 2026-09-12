@@ -202,6 +202,17 @@ def get_gateway(code: str) -> PaymentGateway:
 
 @transaction.atomic
 def initiate_payment(order, gateway_code: str) -> tuple[Payment, dict]:
+    from apps.orders.models import OrderStatus
+
+    # Only an order still waiting on payment can start a payment. Without
+    # this, a stale "Pay Now" tab could open a second Razorpay charge on an
+    # order that was already paid, or start a COD payment on a cancelled
+    # order - which would also send the admin a "new order" alert for it.
+    if order.status not in (OrderStatus.PENDING, OrderStatus.AWAITING_DETAILS):
+        raise ValidationError("This order is no longer awaiting payment.")
+    if order.payments.filter(status=PaymentStatus.SUCCESS).exists():
+        raise ValidationError("This order has already been paid for.")
+
     gateway = get_gateway(gateway_code)
     amount = order.total_amount + COD_FEE if gateway_code == PaymentGatewayChoice.COD else order.total_amount
     payment = Payment.objects.create(order=order, gateway=gateway_code, amount=amount)

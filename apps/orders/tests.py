@@ -82,6 +82,8 @@ class CartAndCheckoutTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(len(response.data["data"]["items"]), 1)
         self.assertEqual(response.data["data"]["items"][0]["stock_quantity"], 5)
+        self.assertEqual(response.data["data"]["items"][0]["product_slug"], self.product.slug)
+        self.assertIsNone(response.data["data"]["items"][0]["product_image"])
 
     def test_cannot_add_more_than_available_stock(self):
         response = self.client.post(reverse("cart-item-list"), {"product_id": self.product.id, "quantity": 6})
@@ -634,6 +636,29 @@ class AbandonedOrderTests(APITestCase):
         self.assertEqual(count, 0)
         self.order.refresh_from_db()
         self.assertEqual(self.order.status, OrderStatus.PENDING)
+
+    def test_cash_on_delivery_order_is_never_reminded_to_pay(self):
+        """Regression: COD orders stay PENDING until the cash is collected, but owe nothing before delivery."""
+        Payment.objects.create(order=self.order, gateway=PaymentGatewayChoice.COD, amount=215)
+        Order.objects.filter(id=self.order.id).update(created_at=timezone.now() - timedelta(hours=3))
+
+        self.assertEqual(services.send_abandoned_order_reminders(), 0)
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_cash_on_delivery_order_is_never_auto_cancelled(self):
+        """Regression: this used to cancel real COD orders (and release their stock) 48 hours in."""
+        Payment.objects.create(order=self.order, gateway=PaymentGatewayChoice.COD, amount=215)
+        Order.objects.filter(id=self.order.id).update(created_at=timezone.now() - timedelta(hours=49))
+
+        self.assertEqual(services.auto_cancel_stale_pending_orders(), 0)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, OrderStatus.PENDING)
+
+    def test_abandoned_razorpay_attempt_is_still_cleaned_up(self):
+        Payment.objects.create(order=self.order, gateway=PaymentGatewayChoice.RAZORPAY, amount=200)
+        Order.objects.filter(id=self.order.id).update(created_at=timezone.now() - timedelta(hours=49))
+
+        self.assertEqual(services.auto_cancel_stale_pending_orders(), 1)
 
 
 class GiftOrderTests(APITestCase):

@@ -1,0 +1,26 @@
+{% extends "emails/base.html" %}
+{% block content %}
+  <p style="margin:0 0 22px 0; font-size:15px; line-height:1.7; color:#3a2f28;">
+    A payment went through for an order that had already been cancelled &mdash; usually because the customer paid
+    in their UPI app and closed the payment sheet before it registered. They have been charged and have no order.
+    The stock has already been released, so this needs you: <strong>refund the payment, or contact the customer and
+    re-create the order.</strong>
+  </p>
+
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px 0;">
+    <tr>
+      <td style="background-color:#fbeaea; border-radius:12px; padding:16px 18px; font-family:Georgia,'Times New Roman',serif;">
+        <p style="margin:0 0 6px 0; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:#8a2b2b;">Customer</p>
+        <p style="margin:0 0 12px 0; font-size:15px; color:#241512;">{{ order.user.full_name }} &middot; {{ order.user.email }}</p>
+        <p style="margin:0 0 6px 0; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:#8a2b2b;">Amount paid</p>
+        <p style="margin:0 0 12px 0; font-size:15px; color:#241512;">&#8377;{{ payment.amount }} via {{ payment.gateway }}</p>
+        <p style="margin:0 0 6px 0; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:#8a2b2b;">Gateway payment ID</p>
+        <p style="margin:0 0 12px 0; font-size:14px; color:#241512; word-break:break-all;">{{ payment.gateway_payment_id|default:"-" }}</p>
+        <p style="margin:0 0 6px 0; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; color:#8a2b2b;">Order ID</p>
+        <p style="margin:0; font-size:14px; color:#241512; word-break:break-all;">{{ order.id }}</p>
+      </td>
+    </tr>
+  </table>
+
+  {% include "emails/_order_items.html" with items=items order=order show_totals=1 %}
+{% endblock %}

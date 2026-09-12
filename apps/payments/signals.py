@@ -15,7 +15,7 @@ from django.dispatch import receiver
 from apps.notifications import services as notification_services
 from apps.orders import referrals
 from apps.orders import services as order_services
-from apps.orders.models import OrderStatus
+from apps.orders.models import Order, OrderStatus
 from apps.payments.models import Payment, PaymentStatus
 
 
@@ -24,7 +24,20 @@ def confirm_order_on_payment_success(sender, instance: Payment, **kwargs):
     if instance.status != PaymentStatus.SUCCESS:
         return
 
-    order = instance.order
+    # Always read the order fresh: `instance.order` can be an object cached
+    # from before the order was cancelled (or otherwise changed), and acting
+    # on that stale status would confirm an order that no longer exists.
+    order = Order.objects.get(pk=instance.order_id)
+    if order.status == OrderStatus.CANCELLED:
+        # Money arrived for an order that no longer exists: most likely the
+        # customer paid in their UPI app and closed the Razorpay sheet before
+        # it saw the result, which abandons (cancels) the order - and then
+        # Razorpay's webhook confirmed the capture. Nothing can safely
+        # un-cancel it automatically (its stock has been released), so a
+        # human has to either refund or re-create it. Silently returning here
+        # left a customer charged with no order and nobody aware.
+        notification_services.notify_admin_payment_for_cancelled_order(order, instance)
+        return
     if order.status not in (OrderStatus.PENDING, OrderStatus.AWAITING_DETAILS):
         return
 

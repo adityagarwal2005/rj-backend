@@ -27,8 +27,19 @@ class AddressSerializer(serializers.ModelSerializer):
         return value
 
 
+def _primary_image_url(product):
+    """The product's primary photo (or first photo), so cart and order rows can show a thumbnail."""
+    if product is None:
+        return None
+    images = list(product.images.all())
+    image = next((img for img in images if img.is_primary), None) or next(iter(images), None)
+    return image.image.url if image else None
+
+
 class CartItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
+    product_slug = serializers.SlugField(source="product.slug", read_only=True)
+    product_image = serializers.SerializerMethodField()
     # Quantity-aware (not just product.effective_price) - a bulk price break
     # means the per-unit price itself can change as quantity changes, so
     # this has to be computed per row rather than read straight off Product.
@@ -40,11 +51,17 @@ class CartItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CartItem
-        fields = ["id", "product", "product_name", "unit_price", "quantity", "subtotal", "stock_quantity"]
+        fields = [
+            "id", "product", "product_name", "product_slug", "product_image",
+            "unit_price", "quantity", "subtotal", "stock_quantity",
+        ]
         read_only_fields = ["id"]
 
     def get_unit_price(self, obj):
         return str(obj.product.price_for_quantity(obj.quantity))
+
+    def get_product_image(self, obj):
+        return _primary_image_url(obj.product)
 
 
 class AddCartItemSerializer(serializers.Serializer):
@@ -81,10 +98,14 @@ class CartSerializer(serializers.ModelSerializer):
 class OrderItemSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     product_slug = serializers.SlugField(source="product.slug", read_only=True, default=None)
+    product_image = serializers.SerializerMethodField()
 
     class Meta:
         model = OrderItem
-        fields = ["id", "product", "product_name", "product_slug", "unit_price", "quantity", "subtotal"]
+        fields = ["id", "product", "product_name", "product_slug", "product_image", "unit_price", "quantity", "subtotal"]
+
+    def get_product_image(self, obj):
+        return _primary_image_url(obj.product)
 
 
 class OrderStatusHistorySerializer(serializers.ModelSerializer):

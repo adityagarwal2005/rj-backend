@@ -175,6 +175,43 @@ def notify_admin_new_order(order) -> None:
     )
 
 
+def notify_admin_payment_for_cancelled_order(order, payment) -> None:
+    """
+    A payment succeeded for an order that had already been cancelled - see
+    apps.payments.signals for how that happens. The customer has been
+    charged and has no order, so this needs a person: refund it, or re-create
+    the order by hand.
+    """
+    if not settings.ADMIN_EMAIL:
+        logger.error("Payment %s succeeded for cancelled order %s and ADMIN_EMAIL is not set", payment.id, order.id)
+        return
+
+    items = list(order.items.all())
+    title = f"Action needed: ₹{payment.amount} paid for a cancelled order"
+    message = (
+        "A payment succeeded for an order that was already cancelled.\n\n"
+        f"Customer: {order.user.full_name} ({order.user.email})\n"
+        f"Amount paid: ₹{payment.amount} via {payment.gateway}\n"
+        f"Gateway payment ID: {payment.gateway_payment_id or '-'}\n"
+        f"Order ID: {order.id}\n\n"
+        "The order's stock has already been released. Refund the payment, or "
+        "contact the customer and re-create the order."
+    )
+    send_email(
+        settings.ADMIN_EMAIL,
+        title,
+        message,
+        template="emails/admin_payment_alert.html",
+        context={
+            "heading": "Paid, but the order was cancelled",
+            "preheader": f"{order.user.full_name} paid ₹{payment.amount} - refund or re-create the order.",
+            "order": order,
+            "payment": payment,
+            "items": items,
+        },
+    )
+
+
 def send_otp_email(user, code: str, purpose: str) -> None:
     if purpose == "signup":
         title = "Verify your email - RajwadiTukda"

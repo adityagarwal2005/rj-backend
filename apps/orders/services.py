@@ -238,11 +238,27 @@ def abandon_pending_order(user, order: Order) -> Order:
     return order
 
 
+def _unpaid_online_orders():
+    """
+    PENDING orders that are genuinely waiting on an online payment.
+
+    Cash on Delivery orders also sit in PENDING - the Payment only flips to
+    success once the cash is collected at the door - but nothing is owed
+    before delivery. Treating them as abandoned emailed COD customers a
+    "your order is still waiting on payment" reminder two hours in and then
+    cancelled their order at 48 hours, restoring its stock, while it was
+    still out for delivery.
+    """
+    from apps.payments.models import PaymentGatewayChoice
+
+    return Order.objects.filter(status=OrderStatus.PENDING).exclude(payments__gateway=PaymentGatewayChoice.COD)
+
+
 def send_abandoned_order_reminders() -> int:
     """Nudge customers with a real unpaid order sitting untouched for a while. Sends at most once per order."""
     cutoff = timezone.now() - ABANDONED_REMINDER_DELAY
-    stale_orders = Order.objects.filter(
-        status=OrderStatus.PENDING, created_at__lte=cutoff, abandoned_reminder_sent_at__isnull=True,
+    stale_orders = _unpaid_online_orders().filter(
+        created_at__lte=cutoff, abandoned_reminder_sent_at__isnull=True,
     ).select_related("user").prefetch_related("items")
 
     count = 0
@@ -260,7 +276,7 @@ def auto_cancel_stale_pending_orders() -> int:
     otherwise abandoned carts would quietly hold inventory hostage forever.
     """
     cutoff = timezone.now() - STALE_ORDER_CANCEL_DELAY
-    stale_orders = Order.objects.filter(status=OrderStatus.PENDING, created_at__lte=cutoff)
+    stale_orders = _unpaid_online_orders().filter(created_at__lte=cutoff)
 
     count = 0
     for order in stale_orders:
