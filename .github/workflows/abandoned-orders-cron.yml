@@ -1,12 +1,13 @@
 name: Process abandoned orders
 
 # Runs the abandoned-order business logic (2h reminder / 48h auto-cancel
-# window - see apps/orders/views.py::ProcessAbandonedOrdersView). Keeping
-# Render awake is UptimeRobot's job now (pings GET /api/health/ every 5 min,
-# far more reliably than GitHub's own scheduler/runner pool - see the health
-# check endpoint in apps/core/views.py), so this only needs to run often
-# enough to keep the reminder/cancel windows reasonably tight; it doesn't
-# need to race Render's spin-down anymore.
+# window - see apps/orders/views.py::ProcessAbandonedOrdersView).
+#
+# Calls Cloud Run directly. This used to call api.rajwaditukda.in, which
+# still points at the old Render service - and Render's deploys have been
+# failing since July, so every run executed July's code against the live
+# database, including the bug that auto-cancelled Cash on Delivery orders
+# after 48 hours, long after that was fixed on Cloud Run.
 on:
   schedule:
     - cron: "*/20 * * * *"
@@ -17,11 +18,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Call process-abandoned endpoint
-        # --retry/--retry-all-errors covers transient 502/503s if Render
-        # ever is cold anyway; --max-time is generous so a slow response
-        # isn't mistaken for a real failure.
+        # --retry/--retry-all-errors covers transient 502/503s on a cold
+        # start; --max-time is generous so a slow response isn't mistaken
+        # for a real failure.
         run: |
-          curl --fail -sS -X POST "https://api.rajwaditukda.in/api/orders/process-abandoned/" \
+          curl --fail -sS -X POST "https://rajwaditukda-backend-916577009279.asia-south1.run.app/api/orders/process-abandoned/" \
             -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
             --retry 5 --retry-all-errors --retry-delay 10 --max-time 90 \
             -w "\nHTTP %{http_code}\n"
