@@ -210,7 +210,14 @@ class RefreshTokenView(TokenRefreshView):
         serializer = self.get_serializer(data=payload)
         try:
             serializer.is_valid(raise_exception=True)
-        except (ValidationError, TokenError):
+        except (ValidationError, TokenError, User.DoesNotExist):
+            # User.DoesNotExist: the token is properly signed but the account
+            # it belongs to has since been deleted. simplejwt lets that
+            # propagate, which turned every refresh from that still-open
+            # browser into a logged 500 instead of a clean "you're logged
+            # out" - and the customer could never get back to a signed-out
+            # state on their own.
+            #
             # Clear the cookies too: leaving a dead refresh cookie in place
             # means the browser retries with it forever and never recovers
             # into a clean logged-out state.

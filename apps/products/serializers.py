@@ -54,6 +54,7 @@ class ProductListSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers.M
 
     category = serializers.CharField(source="category.name", read_only=True)
     primary_image = serializers.SerializerMethodField()
+    secondary_image = serializers.SerializerMethodField()
     effective_price = serializers.DecimalField(max_digits=8, decimal_places=2, read_only=True)
     average_rating = serializers.SerializerMethodField()
     review_count = serializers.SerializerMethodField()
@@ -64,14 +65,25 @@ class ProductListSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers.M
         fields = [
             "id", "name", "slug", "category", "price", "discount_price",
             "effective_price", "bulk_price", "bulk_min_quantity", "weight_label", "stock_quantity", "in_stock",
-            "is_featured", "primary_image", "average_rating", "review_count", "is_wishlisted",
+            "is_featured", "primary_image", "secondary_image", "average_rating", "review_count", "is_wishlisted",
         ]
 
+    def _ordered_images(self, obj):
+        """Primary first, then the rest by display_order - the order a shopper should see them in."""
+        images = sorted(obj.images.all(), key=lambda img: (not img.is_primary, img.display_order, img.id))
+        return images
+
     def get_primary_image(self, obj):
-        image = next((img for img in obj.images.all() if img.is_primary), None) or next(
-            iter(obj.images.all()), None
-        )
-        return ProductImageSerializer(image).data["image"] if image else None
+        images = self._ordered_images(obj)
+        return ProductImageSerializer(images[0]).data["image"] if images else None
+
+    def get_secondary_image(self, obj):
+        """
+        The shot a catalog card cross-fades to on hover. Null for a product
+        with only one photo, in which case the card just stays on the first.
+        """
+        images = self._ordered_images(obj)
+        return ProductImageSerializer(images[1]).data["image"] if len(images) > 1 else None
 
 
 class ProductDetailSerializer(ReviewStatsMixin, WishlistStatusMixin, serializers.ModelSerializer):

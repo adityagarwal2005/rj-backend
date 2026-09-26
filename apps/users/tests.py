@@ -363,6 +363,21 @@ class CookieAuthTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertEqual(response.cookies["rt_refresh"].value, "")
 
+    def test_refresh_for_a_deleted_account_logs_out_instead_of_erroring(self):
+        """
+        The token is properly signed but its account is gone. simplejwt
+        raises User.DoesNotExist, which used to escape as a 500 and left
+        that browser retrying a dead cookie forever with no way back to a
+        signed-out state.
+        """
+        self._login()
+        User.objects.filter(email="cookie@example.com").delete()
+
+        response = self.client.post(reverse("auth-refresh"), {})
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(response.cookies["rt_refresh"].value, "")
+
     def test_no_cookie_and_no_header_is_unauthenticated(self):
         response = self.client.get(reverse("auth-profile"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)

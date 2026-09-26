@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.orders.models import Address, Order, OrderItem, OrderStatus
-from apps.products.models import Category, Product, Review, WishlistItem
+from apps.products.models import Category, Product, ProductImage, Review, WishlistItem
 from apps.users.models import User
 
 
@@ -52,6 +52,46 @@ class ProductTests(APITestCase):
     def test_product_list_shows_is_wishlisted_false_for_anonymous(self):
         response = self.client.get(reverse("product-list"))
         self.assertFalse(response.data["data"]["results"][0]["is_wishlisted"])
+
+
+class CatalogImageOrderingTests(APITestCase):
+    """
+    Catalog cards show the primary photo and cross-fade to the next one on
+    hover, so the list endpoint has to hand back both, in a stable order.
+    """
+
+    def setUp(self):
+        category = Category.objects.create(name="Chocolates")
+        self.product = Product.objects.create(category=category, name="Kunafa Chocolate", price=120, stock_quantity=5)
+
+    def _add_image(self, name, *, is_primary=False, display_order=0):
+        return ProductImage.objects.create(
+            product=self.product, image=f"products/1/{name}", is_primary=is_primary, display_order=display_order
+        )
+
+    def test_primary_photo_leads_and_the_next_one_is_offered_for_hover(self):
+        self._add_image("second.jpeg", display_order=1)
+        self._add_image("hero.jpeg", is_primary=True, display_order=5)
+
+        data = self.client.get(reverse("product-list")).data["data"]["results"][0]
+
+        # Primary wins regardless of its display_order.
+        self.assertIn("hero.jpeg", data["primary_image"])
+        self.assertIn("second.jpeg", data["secondary_image"])
+
+    def test_single_photo_product_has_no_hover_image(self):
+        self._add_image("only.jpeg", is_primary=True)
+
+        data = self.client.get(reverse("product-list")).data["data"]["results"][0]
+
+        self.assertIn("only.jpeg", data["primary_image"])
+        self.assertIsNone(data["secondary_image"])
+
+    def test_product_with_no_photos_at_all(self):
+        data = self.client.get(reverse("product-list")).data["data"]["results"][0]
+
+        self.assertIsNone(data["primary_image"])
+        self.assertIsNone(data["secondary_image"])
 
 
 class BulkPricingTests(APITestCase):
